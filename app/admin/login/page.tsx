@@ -36,8 +36,8 @@ export default function AdminLoginPage() {
       return;
     }
 
-    if (parseInt(captchaInput) !== captchaNum1 + captchaNum2) {
-      setError('កូដផ្ទៀងផ្ទាត់ 2FA Security PIN មិនត្រឹមត្រូវទេ!');
+    if (!captchaInput.trim() || parseInt(captchaInput) !== captchaNum1 + captchaNum2) {
+      setError(`សូមបញ្ចូលលេខចម្លើយ ${captchaNum1} + ${captchaNum2} = ${captchaNum1 + captchaNum2} ចូលក្នុងប្រអប់ «លទ្ធផល» (Please enter security captcha answer ${captchaNum1 + captchaNum2})`);
       generateCaptcha();
       return;
     }
