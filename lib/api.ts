@@ -309,25 +309,6 @@ export const api = {
         throw new Error(err.detail);
       }
     } catch (e: any) {
-      // Direct local fallback for admin accounts if backend API is unreachable or returned error
-      if (
-        (lowerEmail === 'rathadararath8@gmail.com' || lowerEmail === 'admin@stream.com') &&
-        (password === 'admin123' || password === 'admin')
-      ) {
-        return {
-          id: 'u-admin-1',
-          name: 'Master Admin',
-          email: lowerEmail,
-          avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-          role: 'ADMIN',
-          status: 'active',
-          createdAt: '2026-01-01',
-          favorites: [],
-          history: [],
-          token: 'admin_token_' + Date.now(),
-          tokenType: 'Bearer'
-        };
-      }
       throw e;
     }
   },
