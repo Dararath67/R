@@ -78,6 +78,7 @@ const DEFAULT_BANNER_SETTINGS: BannerSettings = {
 
 const MOVIES_CACHE_KEY = 'movie_app_cached_movies';
 const SERIES_CACHE_KEY = 'movie_app_cached_series';
+const GENRES_CACHE_KEY = 'movie_app_cached_genres';
 
 export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [movies, setMovies] = useState<Movie[]>([]);
@@ -127,8 +128,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localStorage.setItem(SERIES_CACHE_KEY, JSON.stringify(fetchedSeries));
       }
       setEpisodes(fetchedEpisodes || []);
-      if (fetchedGenres && fetchedGenres.length > 0) {
+      if (Array.isArray(fetchedGenres)) {
         setGenres(fetchedGenres);
+        localStorage.setItem(GENRES_CACHE_KEY, JSON.stringify(fetchedGenres));
       }
       if (fetchedBanner) {
         setBannerSettings(fetchedBanner);
@@ -155,6 +157,13 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const savedSeries = localStorage.getItem(SERIES_CACHE_KEY);
       if (savedSeries) {
         setSeries(JSON.parse(savedSeries));
+        hasLocalData = true;
+      }
+    } catch {}
+    try {
+      const savedGenres = localStorage.getItem(GENRES_CACHE_KEY);
+      if (savedGenres) {
+        setGenres(JSON.parse(savedGenres));
         hasLocalData = true;
       }
     } catch {}
@@ -294,7 +303,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const deleteGenre = async (id: string) => {
-    setGenres((prev) => prev.filter((g) => g.id !== id));
+    setGenres((prev) => {
+      const updated = prev.filter((g) => g.id !== id);
+      localStorage.setItem(GENRES_CACHE_KEY, JSON.stringify(updated));
+      return updated;
+    });
     try {
       await api.deleteGenre(id);
     } catch (e) {
