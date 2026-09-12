@@ -1,0 +1,631 @@
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
+import { useRouter, useParams } from 'next/navigation';
+import { AdminLayout } from '@/components/admin/AdminLayout';
+import { useData } from '@/context/DataContext';
+import { api } from '@/lib/api';
+import { ArrowLeft, Save, Upload, CheckCircle2, Film, Image as ImageIcon, Sparkles, EyeOff, Check, Flame, Star, Award, AlertCircle, Download, Loader2 } from 'lucide-react';
+
+export default function EditMoviePage() {
+  const router = useRouter();
+  const { id } = useParams();
+  const { movies, series, updateMovie, genres } = useData();
+
+  const allContent = [...movies, ...series];
+  const item = allContent.find((m) => m.id === id);
+
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [releaseYear, setReleaseYear] = useState<number>(2026);
+  const [rating, setRating] = useState<number>(8.5);
+  const [duration, setDuration] = useState('2h 15m');
+  const [posterUrl, setPosterUrl] = useState('');
+  const [backdropUrl, setBackdropUrl] = useState('');
+  const [videoUrl, setVideoUrl] = useState('');
+  const [trailerUrl, setTrailerUrl] = useState('');
+  const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
+  const [cast, setCast] = useState('');
+  const [director, setDirector] = useState('');
+  const [isPublished, setIsPublished] = useState(true);
+  const [isFeatured, setIsFeatured] = useState(false);
+  const [isTrending, setIsTrending] = useState(true);
+  const [isPopular, setIsPopular] = useState(true);
+  const [isLatest, setIsLatest] = useState(true);
+
+  // Upload States
+  const [uploadingVideo, setUploadingVideo] = useState(false);
+  const [uploadingPoster, setUploadingPoster] = useState(false);
+  const [uploadingBackdrop, setUploadingBackdrop] = useState(false);
+  const [downloadingUrl, setDownloadingUrl] = useState(false);
+
+  // Alert Modal State
+  const [alertModal, setAlertModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+  });
+
+  const showAlert = (title: string, message: string) => {
+    setAlertModal({ isOpen: true, title, message });
+  };
+
+  const handleDownloadVideoUrl = async () => {
+    if (!videoUrl || !videoUrl.trim()) {
+      showAlert('ខ្វះព័ត៌មាន', 'សូមបញ្ចូលតំណភ្ជាប់វីដេអូ URL ជាមុនសិន!');
+      return;
+    }
+    if (videoUrl.includes('/uploads/videos/')) {
+      showAlert('ព័ត៌មាន', 'វីដេអូនេះត្រូវបានរក្សាទុកក្នុង Server រួចរាល់ហើយ!');
+      return;
+    }
+
+    setDownloadingUrl(true);
+    try {
+      const res = await api.downloadVideoFromUrl(videoUrl.trim());
+      if (res.url) {
+        setVideoUrl(res.url);
+        showAlert('ជោគជ័យ', 'បានទាញយក និងរក្សាទុកវីដេអូក្នុង Server ដោយជោគជ័យ!');
+      }
+    } catch (err: any) {
+      showAlert('បរាជ័យ', err.message || 'បរាជ័យក្នុងការទាញយកវីដេអូពី Link');
+    } finally {
+      setDownloadingUrl(false);
+    }
+  };
+
+  useEffect(() => {
+    if (item) {
+      setTitle(item.title);
+      setDescription(item.description);
+      setReleaseYear(item.releaseYear);
+      setRating(item.rating);
+      setDuration(item.duration);
+      setPosterUrl(item.posterUrl);
+      setBackdropUrl(item.backdropUrl);
+      setVideoUrl(item.videoUrl);
+      setTrailerUrl(item.trailerUrl);
+      setSelectedGenres(item.genres || []);
+      setDirector(item.director || '');
+      setIsPublished(item.isPublished);
+      setIsFeatured(item.isFeatured || false);
+      setIsTrending(item.isTrending || false);
+      setIsPopular(item.isPopular || false);
+      setIsLatest(item.isLatest || false);
+    }
+  }, [item]);
+
+  if (!item) {
+    return (
+      <AdminLayout>
+        <div className="p-8 text-center text-slate-900 font-bold">មិនរកឃើញភាពយន្តឡើយ</div>
+      </AdminLayout>
+    );
+  }
+
+  const handleVideoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setUploadingVideo(true);
+      const res = await api.uploadVideo(file);
+      setVideoUrl(res.url);
+    } catch (err) {
+      showAlert('បរាជ័យ', 'បរាជ័យក្នុងការផ្ទុកឡើងឯកសារវីដេអូ');
+    } finally {
+      setUploadingVideo(false);
+    }
+  };
+
+  const handlePosterFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setUploadingPoster(true);
+      const res = await api.uploadImage(file);
+      setPosterUrl(res.url);
+    } catch (err) {
+      showAlert('បរាជ័យ', 'បរាជ័យក្នុងការផ្ទុកឡើងរូបភាព Poster');
+    } finally {
+      setUploadingPoster(false);
+    }
+  };
+
+  const handleBackdropFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setUploadingBackdrop(true);
+      const res = await api.uploadImage(file);
+      setBackdropUrl(res.url);
+    } catch (err) {
+      showAlert('បរាជ័យ', 'បរាជ័យក្នុងការផ្ទុកឡើងរូបភាព Backdrop');
+    } finally {
+      setUploadingBackdrop(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await updateMovie(item.id, {
+      title,
+      description,
+      releaseYear,
+      rating,
+      duration,
+      posterUrl,
+      backdropUrl,
+      videoUrl,
+      trailerUrl,
+      genres: selectedGenres,
+      director,
+      isPublished,
+      isFeatured,
+      isTrending,
+      isPopular,
+      isLatest,
+    });
+
+    router.push('/admin/movies');
+  };
+
+  const toggleGenre = (gName: string) => {
+    if (selectedGenres.includes(gName)) {
+      setSelectedGenres(selectedGenres.filter((g) => g !== gName));
+    } else {
+      setSelectedGenres([...selectedGenres, gName]);
+    }
+  };
+
+  return (
+    <AdminLayout>
+      <div className="max-w-4xl mx-auto space-y-6">
+        <div className="flex items-center justify-between border-b border-slate-200 pb-4">
+          <div className="flex items-center space-x-3">
+            <button
+              onClick={() => router.back()}
+              className="p-2 rounded-xl bg-white border border-slate-200 text-slate-600 hover:text-slate-900 shadow-xs"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+            <div>
+              <h1 className="text-2xl font-black text-slate-900">កែប្រែភាពយន្ត: {item.title}</h1>
+              <p className="text-xs text-slate-500 font-medium">ធ្វើបច្ចុប្បន្នភាពព័ត៌មានភាពយន្ត ឬផ្ទុកឡើងឯកសារវីដេអូសារជាថ្មី</p>
+            </div>
+          </div>
+        </div>
+
+        <form onSubmit={handleSubmit} className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 space-y-6 shadow-sm">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs">
+            {/* Movie Title */}
+            <div className="md:col-span-2 space-y-1.5">
+              <label className="block font-bold text-slate-700 uppercase tracking-wider">
+                ចំណងជើងភាពយន្ត *
+              </label>
+              <input
+                type="text"
+                required
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-xl p-3 text-sm focus:border-brand-red focus:bg-white focus:outline-none"
+              />
+            </div>
+
+            {/* Movie Description */}
+            <div className="md:col-span-2 space-y-1.5">
+              <label className="block font-bold text-slate-700 uppercase tracking-wider">
+                សង្ខេបរឿង / ការពិពណ៌នា
+              </label>
+              <textarea
+                rows={3}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-xl p-3 text-sm focus:border-brand-red focus:bg-white focus:outline-none"
+              />
+            </div>
+
+            {/* DIRECT VIDEO UPLOAD SECTION */}
+            <div className="md:col-span-2 bg-slate-50 border-2 border-dashed border-slate-300 p-5 rounded-2xl space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="block font-extrabold text-slate-900 uppercase tracking-wider flex items-center space-x-2">
+                  <Film className="w-4 h-4 text-brand-red" />
+                  <span>ផ្ទុកឡើងឯកសារវីដេអូភាពយន្ត (MP4 / WebM / MOV) *</span>
+                </label>
+                {uploadingVideo && (
+                  <span className="text-xs font-bold text-brand-red animate-pulse">កំពុងផ្ទុកឡើងវីដេអូ...</span>
+                )}
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center gap-3">
+                <label className="cursor-pointer bg-brand-red hover:bg-brand-crimson text-white font-bold px-4 py-2.5 rounded-xl flex items-center space-x-2 text-xs shadow-md shrink-0">
+                  <Upload className="w-4 h-4" />
+                  <span>ផ្ទុកឡើងវីដេអូឡើងវិញ</span>
+                  <input
+                    type="file"
+                    accept="video/*"
+                    onChange={handleVideoFileChange}
+                    className="hidden"
+                  />
+                </label>
+                <span className="text-slate-400 font-bold">ឬ</span>
+                <div className="flex items-center space-x-2 w-full">
+                  <input
+                    type="url"
+                    placeholder="បញ្ជូលតំណភ្ជាប់វីដេអូ URL ខាងក្រៅ..."
+                    value={videoUrl}
+                    onChange={(e) => setVideoUrl(e.target.value)}
+                    className="flex-grow bg-white border border-slate-200 text-slate-900 rounded-xl p-2.5 text-xs font-mono"
+                  />
+                  {videoUrl && !videoUrl.includes('/uploads/videos/') && (
+                    <button
+                      type="button"
+                      onClick={handleDownloadVideoUrl}
+                      disabled={downloadingUrl}
+                      className="px-3.5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs flex items-center space-x-1.5 shrink-0 shadow-sm transition-all disabled:opacity-50 cursor-pointer"
+                      title="ទាញយក និងរក្សាទុកវីដេអូក្នុង Server ស្វ័យប្រវត្តិ"
+                    >
+                      {downloadingUrl ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                      <span>{downloadingUrl ? 'កំពុងទាញយក...' : 'ទាញយក & រក្សាទុកក្នុង Server'}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {videoUrl && (
+                <div className="flex items-center space-x-2 text-xs text-emerald-700 bg-emerald-50 p-2.5 rounded-xl border border-emerald-200 font-semibold truncate">
+                  <CheckCircle2 className="w-4 h-4 flex-shrink-0 text-emerald-600" />
+                  <span className="truncate">
+                    {videoUrl.includes('/uploads/videos/')
+                      ? `វីដេអូបានរក្សាទុកក្នុង Server: ${videoUrl}`
+                      : `វីដេអូត្រៀមរួចរាល់: ${videoUrl}`}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* DIRECT POSTER UPLOAD */}
+            <div className="space-y-2">
+              <label className="block font-bold text-slate-700 uppercase tracking-wider flex items-center space-x-1">
+                <ImageIcon className="w-4 h-4 text-amber-600" />
+                <span>ផ្ទុកឡើងរូបភាព Poster</span>
+              </label>
+              <div className="flex items-center space-x-2">
+                <label className="cursor-pointer bg-slate-800 hover:bg-slate-900 text-white font-bold px-3 py-2 rounded-xl text-xs flex items-center space-x-1.5">
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>ជ្រើសរើស Poster</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handlePosterFileChange}
+                    className="hidden"
+                  />
+                </label>
+                {uploadingPoster && <span className="text-[10px] text-brand-red animate-pulse">កំពុងផ្ទុកឡើង...</span>}
+              </div>
+              <input
+                type="url"
+                value={posterUrl}
+                onChange={(e) => setPosterUrl(e.target.value)}
+                placeholder="តំណភ្ជាប់ Poster URL..."
+                className="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-xl p-2.5 text-xs"
+              />
+            </div>
+
+            {/* DIRECT BACKDROP UPLOAD */}
+            <div className="space-y-2">
+              <label className="block font-bold text-slate-700 uppercase tracking-wider flex items-center space-x-1">
+                <ImageIcon className="w-4 h-4 text-amber-600" />
+                <span>ផ្ទុកឡើងរូបភាព Backdrop</span>
+              </label>
+              <div className="flex items-center space-x-2">
+                <label className="cursor-pointer bg-slate-800 hover:bg-slate-900 text-white font-bold px-3 py-2 rounded-xl text-xs flex items-center space-x-1.5">
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>ជ្រើសរើស Backdrop</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleBackdropFileChange}
+                    className="hidden"
+                  />
+                </label>
+                {uploadingBackdrop && <span className="text-[10px] text-brand-red animate-pulse">កំពុងផ្ទុកឡើង...</span>}
+              </div>
+              <input
+                type="url"
+                value={backdropUrl}
+                onChange={(e) => setBackdropUrl(e.target.value)}
+                placeholder="តំណភ្ជាប់ Backdrop URL..."
+                className="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-xl p-2.5 text-xs"
+              />
+            </div>
+
+            {/* Release Year */}
+            <div className="space-y-1.5">
+              <label className="block font-bold text-slate-700 uppercase tracking-wider">
+                ឆ្នាំចេញផ្សាយ
+              </label>
+              <input
+                type="number"
+                value={releaseYear}
+                onChange={(e) => setReleaseYear(parseInt(e.target.value))}
+                className="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-xl p-3 text-sm focus:border-brand-red focus:bg-white focus:outline-none"
+              />
+            </div>
+
+            {/* Rating */}
+            <div className="space-y-1.5">
+              <label className="block font-bold text-slate-700 uppercase tracking-wider">
+                ពិន្ទុវាយតម្លៃ (0 - 10)
+              </label>
+              <input
+                type="number"
+                step="0.1"
+                min="0"
+                max="10"
+                value={rating}
+                onChange={(e) => setRating(parseFloat(e.target.value))}
+                className="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-xl p-3 text-sm focus:border-brand-red focus:bg-white focus:outline-none"
+              />
+            </div>
+
+            {/* Director */}
+            <div className="space-y-1.5">
+              <label className="block font-bold text-slate-700 uppercase tracking-wider">
+                អ្នកដឹកនាំ
+              </label>
+              <input
+                type="text"
+                value={director}
+                onChange={(e) => setDirector(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-xl p-3 text-sm focus:border-brand-red focus:bg-white focus:outline-none"
+              />
+            </div>
+
+            {/* Duration */}
+            <div className="space-y-1.5">
+              <label className="block font-bold text-slate-700 uppercase tracking-wider">
+                រយៈពេល
+              </label>
+              <input
+                type="text"
+                placeholder="ឧ. 2h 15m"
+                value={duration}
+                onChange={(e) => setDuration(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-xl p-3 text-sm focus:border-brand-red focus:bg-white focus:outline-none"
+              />
+            </div>
+
+            {/* Genres Selector */}
+            <div className="md:col-span-2 space-y-2">
+              <label className="block font-bold text-slate-700 uppercase tracking-wider">
+                ប្រភេទភាពយន្ត
+              </label>
+              <div className="flex flex-wrap gap-2.5">
+                {genres.map((g) => {
+                  const isSel = selectedGenres.includes(g.name);
+                  return (
+                    <button
+                      type="button"
+                      key={g.id}
+                      onClick={() => toggleGenre(g.name)}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center space-x-1.5 transition-all duration-75 active:duration-0 ease-out transform active:scale-95 hover:scale-[1.02] ${
+                        isSel
+                          ? 'bg-brand-red text-white shadow-md shadow-brand-red/25 ring-2 ring-brand-red/40 scale-[1.02]'
+                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200/80 border border-slate-200'
+                      }`}
+                    >
+                      {isSel && <Check className="w-3.5 h-3.5 text-white flex-shrink-0 animate-fade-in" />}
+                      <span>{g.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* HOMEPAGE SECTIONS ASSIGNMENT & BANNER DISPLAY TOGGLES */}
+            <div className="md:col-span-2 space-y-4 pt-4 border-t border-slate-200">
+              <div className="flex items-center justify-between">
+                <h3 className="font-extrabold text-slate-900 text-sm uppercase tracking-wider flex items-center space-x-2">
+                  <Award className="w-4 h-4 text-brand-red" />
+                  <span>កំណត់ការបង្ហាញលើទំព័រដើម (Homepage Sections)</span>
+                </h3>
+                <label className="flex items-center space-x-2 cursor-pointer bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-xs hover:border-slate-300 transition-all">
+                  <input
+                    type="checkbox"
+                    checked={isPublished}
+                    onChange={(e) => setIsPublished(e.target.checked)}
+                    className="w-4 h-4 accent-brand-red rounded transition-all cursor-pointer"
+                  />
+                  <span className="text-xs font-bold text-slate-800 select-none">បោះពុម្ពផ្សាយ</span>
+                </label>
+              </div>
+
+              {/* 1. Hero Banner Toggle */}
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-800 text-xs flex items-center space-x-2">
+                    <Sparkles className="w-4 h-4 text-brand-red" />
+                    <span>១. ការបង្ហាញលើ Hero Banner</span>
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsFeatured(true)}
+                    className={`p-3 rounded-xl font-bold text-xs flex items-center justify-center space-x-2 border transition-all duration-75 active:duration-0 ease-out transform active:scale-95 ${
+                      isFeatured
+                        ? 'bg-brand-red text-white border-brand-red shadow-md ring-2 ring-brand-red/30'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    <span>បង្ហាញលើ Banner (Show in Banner)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsFeatured(false)}
+                    className={`p-3 rounded-xl font-bold text-xs flex items-center justify-center space-x-2 border transition-all duration-75 active:duration-0 ease-out transform active:scale-95 ${
+                      !isFeatured
+                        ? 'bg-slate-900 text-white border-slate-900 shadow-md ring-2 ring-slate-900/30'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <EyeOff className="w-4 h-4" />
+                    <span>មិនបង្ហាញលើ Banner</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 2. Trending Movies Section Toggle */}
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-800 text-xs flex items-center space-x-2">
+                    <Flame className="w-4 h-4 text-amber-500" />
+                    <span>២. ផ្នែក កំពុងពេញនិយមខ្លាំង (Trending Movies)</span>
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsTrending(true)}
+                    className={`p-3 rounded-xl font-bold text-xs flex items-center justify-center space-x-2 border transition-all duration-75 active:duration-0 ease-out transform active:scale-95 ${
+                      isTrending
+                        ? 'bg-amber-500 text-white border-amber-500 shadow-md ring-2 ring-amber-500/30'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <Flame className="w-4 h-4" />
+                    <span>បន្ថែមចូល កំពុងពេញនិយមខ្លាំង</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsTrending(false)}
+                    className={`p-3 rounded-xl font-bold text-xs flex items-center justify-center space-x-2 border transition-all duration-75 active:duration-0 ease-out transform active:scale-95 ${
+                      !isTrending
+                        ? 'bg-slate-900 text-white border-slate-900 shadow-md ring-2 ring-slate-900/30'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <EyeOff className="w-4 h-4" />
+                    <span>មិនបញ្ចូល កំពុងពេញនិយម</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 3. Popular Movies Section Toggle */}
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-800 text-xs flex items-center space-x-2">
+                    <Film className="w-4 h-4 text-blue-600" />
+                    <span>៣. ផ្នែក ភាពយន្ត និងរឿងភាគល្បីៗ (Popular Movies)</span>
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsPopular(true)}
+                    className={`p-3 rounded-xl font-bold text-xs flex items-center justify-center space-x-2 border transition-all duration-75 active:duration-0 ease-out transform active:scale-95 ${
+                      isPopular
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-md ring-2 ring-blue-600/30'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <Film className="w-4 h-4" />
+                    <span>បន្ថែមចូល ភាពយន្តល្បីៗ</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsPopular(false)}
+                    className={`p-3 rounded-xl font-bold text-xs flex items-center justify-center space-x-2 border transition-all duration-75 active:duration-0 ease-out transform active:scale-95 ${
+                      !isPopular
+                        ? 'bg-slate-900 text-white border-slate-900 shadow-md ring-2 ring-slate-900/30'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <EyeOff className="w-4 h-4" />
+                    <span>មិនបញ្ចូល ភាពយន្តល្បីៗ</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 4. Recommended / Latest Movies Section Toggle */}
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-800 text-xs flex items-center space-x-2">
+                    <Star className="w-4 h-4 text-purple-600" />
+                    <span>៤. ផ្នែក ភាពយន្តណែនាំពិសេស (Recommended Movies)</span>
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsLatest(true)}
+                    className={`p-3 rounded-xl font-bold text-xs flex items-center justify-center space-x-2 border transition-all duration-75 active:duration-0 ease-out transform active:scale-95 ${
+                      isLatest
+                        ? 'bg-purple-600 text-white border-purple-600 shadow-md ring-2 ring-purple-600/30'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <Star className="w-4 h-4" />
+                    <span>បន្ថែមចូល ភាពយន្តណែនាំពិសេស</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsLatest(false)}
+                    className={`p-3 rounded-xl font-bold text-xs flex items-center justify-center space-x-2 border transition-all duration-75 active:duration-0 ease-out transform active:scale-95 ${
+                      !isLatest
+                        ? 'bg-slate-900 text-white border-slate-900 shadow-md ring-2 ring-slate-900/30'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <EyeOff className="w-4 h-4" />
+                    <span>មិនបញ្ចូល ភាពយន្តណែនាំ</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="pt-6 border-t border-slate-200 flex justify-end">
+            <button
+              type="submit"
+              disabled={uploadingVideo || uploadingPoster}
+              className="px-8 py-3 bg-brand-red hover:bg-brand-crimson text-white font-bold rounded-2xl shadow-md shadow-brand-red/20 flex items-center space-x-2 text-sm disabled:opacity-50 transition-all duration-75 active:duration-0 transform active:scale-95"
+            >
+              <Save className="w-4 h-4" />
+              <span>រក្សាទុកការកែប្រែភាពយន្ត</span>
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* CUSTOM ALERT MODAL PORTAL */}
+      {alertModal.isOpen && typeof window !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[999999] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 max-w-sm sm:max-w-md w-full text-center space-y-4 shadow-2xl text-white">
+            <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto bg-brand-red/10 border border-brand-red/30 text-brand-red">
+              <AlertCircle className="w-7 h-7" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-white">{alertModal.title}</h3>
+              <p className="text-xs text-slate-300 mt-1 font-medium">{alertModal.message}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setAlertModal((prev) => ({ ...prev, isOpen: false }))}
+              className="w-full py-3 rounded-2xl bg-brand-red hover:bg-red-700 text-white font-extrabold text-xs transition shadow-lg shadow-brand-red/20"
+            >
+              យល់ព្រម
+            </button>
+          </div>
+        </div>,
+        document.body
+      )}
+    </AdminLayout>
+  );
+}
