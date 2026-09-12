@@ -36,12 +36,6 @@ export default function AdminLoginPage() {
       return;
     }
 
-    if (!captchaInput.trim() || parseInt(captchaInput) !== captchaNum1 + captchaNum2) {
-      setError(`សូមបញ្ចូលលេខចម្លើយ ${captchaNum1} + ${captchaNum2} = ${captchaNum1 + captchaNum2} ចូលក្នុងប្រអប់ «លទ្ធផល» (Please enter security captcha answer ${captchaNum1 + captchaNum2})`);
-      generateCaptcha();
-      return;
-    }
-
     setLoading(true);
     setError('');
 
@@ -124,39 +118,6 @@ export default function AdminLoginPage() {
             </div>
           </div>
 
-          {/* Admin 2FA Security PIN Challenge */}
-          <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-2xl space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="font-bold text-amber-400 text-[11px] flex items-center gap-1.5 uppercase tracking-wider">
-                <LockKeyhole className="w-4 h-4 text-amber-400" />
-                2FA Admin Verification PIN
-              </span>
-              <button
-                type="button"
-                onClick={generateCaptcha}
-                className="text-slate-500 hover:text-brand-red p-1 rounded-md transition-colors"
-                title="ប្តូរសំណួរ"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-              </button>
-            </div>
-            <div className="flex items-center space-x-3">
-              <div className="bg-slate-800 text-amber-300 font-extrabold px-3 py-2 rounded-xl text-sm tracking-widest select-none">
-                {captchaNum1} + {captchaNum2} = ?
-              </div>
-              <input
-                type="number"
-                required
-                placeholder={`បញ្ចូលលេខ ${captchaNum1 + captchaNum2}`}
-                value={captchaInput}
-                onChange={(e) => setCaptchaInput(e.target.value)}
-                className="flex-1 bg-slate-900 border-2 border-amber-500/60 text-white rounded-xl py-2 px-3 text-sm font-bold focus:outline-none focus:border-amber-400 shadow-sm"
-              />
-            </div>
-            <p className="text-[11px] text-amber-400 font-bold mt-1.5 flex items-center gap-1">
-              <span>👉</span> វាយបញ្ចូលលេខ <span className="bg-amber-400/20 text-amber-300 px-1.5 py-0.5 rounded font-extrabold">{captchaNum1 + captchaNum2}</span> ចូលក្នុងប្រអប់ខាងលើ មុននឹងចុច Sign In
-            </p>
-          </div>
 
           <button
             type="submit"
