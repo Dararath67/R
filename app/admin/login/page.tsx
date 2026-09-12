@@ -147,12 +147,15 @@ export default function AdminLoginPage() {
               <input
                 type="number"
                 required
-                placeholder="PIN"
+                placeholder={`បញ្ចូលលេខ ${captchaNum1 + captchaNum2}`}
                 value={captchaInput}
                 onChange={(e) => setCaptchaInput(e.target.value)}
-                className="flex-1 bg-slate-900 border border-slate-700 text-white rounded-xl py-2 px-3 text-sm font-bold focus:outline-none focus:border-brand-red"
+                className="flex-1 bg-slate-900 border-2 border-amber-500/60 text-white rounded-xl py-2 px-3 text-sm font-bold focus:outline-none focus:border-amber-400 shadow-sm"
               />
             </div>
+            <p className="text-[11px] text-amber-400 font-bold mt-1.5 flex items-center gap-1">
+              <span>👉</span> វាយបញ្ចូលលេខ <span className="bg-amber-400/20 text-amber-300 px-1.5 py-0.5 rounded font-extrabold">{captchaNum1 + captchaNum2}</span> ចូលក្នុងប្រអប់ខាងលើ មុននឹងចុច Sign In
+            </p>
           </div>
 
           <button

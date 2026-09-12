@@ -155,12 +155,15 @@ export default function LoginPage() {
                 <input
                   type="number"
                   required
-                  placeholder="លទ្ធផល"
+                  placeholder={`បញ្ចូលលេខ ${captchaNum1 + captchaNum2}`}
                   value={captchaInput}
                   onChange={(e) => setCaptchaInput(e.target.value)}
-                  className="flex-1 bg-white border border-slate-200 text-slate-900 rounded-xl py-2 px-3 text-sm font-bold focus:outline-none focus:border-brand-red"
+                  className="flex-1 bg-white border-2 border-brand-red/60 text-slate-900 rounded-xl py-2 px-3 text-sm font-bold focus:outline-none focus:border-brand-red shadow-sm"
                 />
               </div>
+              <p className="text-[11px] text-red-600 font-bold mt-1.5 flex items-center gap-1">
+                <span>👉</span> វាយបញ្ចូលលេខ <span className="bg-red-100 text-brand-red px-1.5 py-0.5 rounded font-extrabold">{captchaNum1 + captchaNum2}</span> ចូលក្នុងប្រអប់ខាងលើ មុននឹងចុច Sign In
+              </p>
             </div>
 
             <button
