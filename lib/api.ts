@@ -400,7 +400,7 @@ export const api = {
   async changePassword(userId: string, oldPassword?: string, newPassword?: string) {
     const res = await fetch(`${API_BASE_URL}/users/change-password`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
       body: JSON.stringify({ userId, oldPassword, newPassword }),
     });
     if (!res.ok) {

@@ -1014,10 +1014,18 @@ def toggle_user_favorite(content_id: str, authorization: Optional[str] = Header(
 
 @app.post("/api/users/change-password")
 def change_user_password(payload: dict, authorization: Optional[str] = Header(None)):
-    user_token = get_current_user_from_token(authorization)
-    user_id = payload.get("userId") or user_token.get("sub")
+    user_id = payload.get("userId")
     old_password = payload.get("oldPassword", "")
     new_password = payload.get("newPassword", "")
+
+    if authorization and authorization.startswith("Bearer "):
+        try:
+            token_payload = get_current_user_from_token(authorization)
+            if not user_id:
+                user_id = token_payload.get("sub")
+        except Exception:
+            pass
+
     if not user_id or not new_password:
         raise HTTPException(status_code=400, detail="សូមបញ្ចូលលេខសម្ងាត់ថ្មី (Password required)")
 
