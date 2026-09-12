@@ -40,6 +40,15 @@ IP_REQUEST_LOGS = {}
 ALLOWED_VIDEO_EXT = {".mp4", ".mkv", ".webm", ".mov", ".avi"}
 ALLOWED_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg"}
 
+BASE_URL = os.getenv("BASE_URL", "").rstrip("/")
+
+def get_base_url(request: Request) -> str:
+    if BASE_URL:
+        return BASE_URL
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = request.headers.get("x-forwarded-host", request.url.netloc)
+    return f"{scheme}://{host}"
+
 def log_security_audit(event_type: str, details: str, ip_address: str = "127.0.0.1"):
     try:
         conn = get_db_connection()
@@ -181,7 +190,7 @@ app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 
 # ---------------- DIRECT FILE UPLOADS ----------------
 @app.post("/api/upload/video")
-async def upload_video(file: UploadFile = File(...), authorization: Optional[str] = Header(None)):
+async def upload_video(request: Request, file: UploadFile = File(...), authorization: Optional[str] = Header(None)):
     filename = os.path.basename(file.filename or "")
     ext = os.path.splitext(filename)[1].lower() or ".mp4"
     if ext not in ALLOWED_VIDEO_EXT:
@@ -194,7 +203,7 @@ async def upload_video(file: UploadFile = File(...), authorization: Optional[str
     with open(filepath, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
         
-    url = f"http://127.0.0.1:8000/uploads/videos/{safe_filename}"
+    url = f"{get_base_url(request)}/uploads/videos/{safe_filename}"
     return {"url": url, "filename": safe_filename}
 
 @app.post("/api/upload/download-url")
@@ -232,7 +241,7 @@ async def download_remote_video_url(request: Request):
         with urllib.request.urlopen(req, context=ctx, timeout=600) as response, open(filepath, "wb") as buffer:
             shutil.copyfileobj(response, buffer)
             
-        url = f"http://127.0.0.1:8000/uploads/videos/{safe_filename}"
+        url = f"{get_base_url(request)}/uploads/videos/{safe_filename}"
         return {"url": url, "filename": safe_filename}
     except Exception as e:
         print("download_remote_video_url error:", e)
@@ -242,7 +251,7 @@ async def download_remote_video_url(request: Request):
         )
 
 @app.post("/api/upload/image")
-async def upload_image(file: UploadFile = File(...), authorization: Optional[str] = Header(None)):
+async def upload_image(request: Request, file: UploadFile = File(...), authorization: Optional[str] = Header(None)):
     filename = os.path.basename(file.filename or "")
     ext = os.path.splitext(filename)[1].lower() or ".jpg"
     if ext not in ALLOWED_IMAGE_EXT:
@@ -255,7 +264,7 @@ async def upload_image(file: UploadFile = File(...), authorization: Optional[str
     with open(filepath, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
         
-    url = f"http://127.0.0.1:8000/uploads/images/{safe_filename}"
+    url = f"{get_base_url(request)}/uploads/images/{safe_filename}"
     return {"url": url, "filename": safe_filename}
 
 # ---------------- NOTIFICATIONS ----------------
@@ -1511,7 +1520,8 @@ def send_chat_message_endpoint(payload: dict, authorization: Optional[str] = Hea
     return {"message": "សារត្រូវបានផ្ញើ! (Message sent)", "id": msg_id}
 
 @app.post("/api/chat/upload")
-async def upload_chat_file_endpoint(
+async def upload_chat_attachment(
+    request: Request,
     file: UploadFile = File(...),
     authorization: Optional[str] = Header(None)
 ):
@@ -1533,7 +1543,7 @@ async def upload_chat_file_endpoint(
     with open(filepath, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    url = f"http://127.0.0.1:8000/uploads/chat/{safe_filename}"
+    url = f"{get_base_url(request)}/uploads/chat/{safe_filename}"
     return {
         "url": url,
         "mediaType": media_type,
