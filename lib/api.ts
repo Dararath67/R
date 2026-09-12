@@ -625,6 +625,18 @@ export const api = {
     }
   },
 
+  async setTelegramWebhook() {
+    const res = await fetch(`${API_BASE_URL}/admin/settings/telegram/set-webhook`, {
+      method: 'POST',
+      headers: { ...getAuthHeader() },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'បរាជ័យក្នុងការភ្ជាប់ Telegram Webhook');
+    }
+    return await res.json();
+  },
+
   // Active User Sessions & Force Logout
   async getActiveSessions() {
     try {

@@ -1355,6 +1355,111 @@ def test_telegram_settings(payload: dict, authorization: Optional[str] = Header(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"បរាជ័យក្នុងការផ្ញើសារសាកល្បង: {str(e)}")
 
+@app.post("/api/telegram/webhook")
+async def telegram_webhook_handler(request: Request):
+    try:
+        data = await request.json()
+        message = data.get("message") or data.get("channel_post")
+        if not message:
+            return {"status": "ok"}
+            
+        chat_id = message.get("chat", {}).get("id")
+        text = message.get("text", "")
+        
+        token = get_setting("telegram_bot_token")
+        if not token:
+            return {"status": "no_bot_token"}
+            
+        import urllib.request
+        import urllib.parse
+        import json
+        import ssl
+        
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+
+        def send_tg_reply(reply_text: str):
+            try:
+                reply_url = f"https://api.telegram.org/bot{token}/sendMessage"
+                payload = urllib.parse.urlencode({"chat_id": chat_id, "text": reply_text, "parse_mode": "HTML"}).encode('utf-8')
+                req = urllib.request.Request(reply_url, data=payload)
+                urllib.request.urlopen(req, context=ctx, timeout=10)
+            except Exception as err:
+                print("send_tg_reply error:", err)
+
+        file_obj = message.get("video") or message.get("document") or message.get("animation")
+        if file_obj:
+            file_id = file_obj.get("file_id")
+            file_name = file_obj.get("file_name") or f"tg_video_{uuid.uuid4().hex[:8]}.mp4"
+            ext = os.path.splitext(file_name)[1].lower() or ".mp4"
+            
+            send_tg_reply(f"⏳ <b>កំពុងទាញយក និងរក្សាទុកវីដេអូក្នុង Server...</b>\nFILE: <code>{file_name}</code>")
+            
+            get_file_url = f"https://api.telegram.org/bot{token}/getFile?file_id={file_id}"
+            req = urllib.request.Request(get_file_url)
+            with urllib.request.urlopen(req, context=ctx, timeout=15) as res:
+                file_info = json.loads(res.read().decode('utf-8'))
+                
+            if file_info.get("ok"):
+                file_path = file_info["result"]["file_path"]
+                dl_url = f"https://api.telegram.org/file/bot{token}/{file_path}"
+                
+                safe_filename = f"tlg_{uuid.uuid4().hex[:12]}{ext}"
+                dest_path = os.path.join(VIDEOS_DIR, safe_filename)
+                
+                dl_req = urllib.request.Request(dl_url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(dl_req, context=ctx, timeout=600) as response, open(dest_path, "wb") as out_file:
+                    shutil.copyfileobj(response, out_file)
+                    
+                video_public_url = f"{get_base_url(request)}/uploads/videos/{safe_filename}"
+                
+                reply_msg = (
+                    f"✅ <b>Upload វីដេអូទៅ Server ជោគជ័យ!</b>\n\n"
+                    f"📁 <b>ឈ្មោះឯកសារ:</b> {file_name}\n"
+                    f"🔗 <b>Video URL (សម្រាប់បញ្ចូលក្នុង Web):</b>\n"
+                    f"<code>{video_public_url}</code>\n\n"
+                    f"លោកអ្នកអាច Copy Link ខាងលើនេះទៅដាក់ក្នុង Admin Panel ទំព័របន្ថែមរឿងបានភ្លាមៗ!"
+                )
+                send_tg_reply(reply_msg)
+                return {"status": "success", "url": video_public_url}
+        elif text and text.startswith("/start"):
+            send_tg_reply(
+                "👋 <b>សូមស្វាគមន៍មកកាន់ Telegram Video Upload Bot!</b>\n\n"
+                "លោកអ្នកអាចផ្ញើឯកសារវីដេអូ (.mp4, .mkv, .mov) មកកាន់ Bot នេះផ្ទាល់ នោះប្រព័ន្ធនឹង Upload ចូល Server និងបង្កើតជា Link URL ជូនស្វ័យប្រវត្តិ!"
+            )
+    except Exception as e:
+        print("telegram_webhook_handler error:", e)
+    return {"status": "ok"}
+
+@app.post("/api/admin/settings/telegram/set-webhook")
+def set_telegram_webhook(request: Request, authorization: Optional[str] = Header(None)):
+    token = get_setting("telegram_bot_token")
+    if not token:
+        raise HTTPException(status_code=400, detail="សូមបញ្ចូល Telegram Bot Token ជាមុនសិន")
+    try:
+        import urllib.request
+        import urllib.parse
+        import json
+        import ssl
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        
+        base_domain = get_base_url(request)
+        webhook_url = f"{base_domain}/api/telegram/webhook"
+        
+        set_url = f"https://api.telegram.org/bot{token}/setWebhook?url={webhook_url}"
+        req = urllib.request.Request(set_url)
+        with urllib.request.urlopen(req, context=ctx, timeout=10) as res:
+            data = json.loads(res.read().decode('utf-8'))
+            if data.get("ok"):
+                return {"message": f"បានភ្ជាប់ Telegram Bot Webhook ដោយជោគជ័យ! ({webhook_url})"}
+            else:
+                raise HTTPException(status_code=400, detail=data.get("description", "Set webhook failed"))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"បរាជ័យក្នុងការភ្ជាប់ Webhook: {str(e)}")
+
 # ---------------- USER ACTIVE SESSIONS ENDPOINTS ----------------
 @app.get("/api/admin/sessions")
 def get_user_sessions_endpoint(authorization: Optional[str] = Header(None)):
