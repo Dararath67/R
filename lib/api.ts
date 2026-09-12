@@ -4,6 +4,32 @@ const getApiBaseUrl = () => {
 };
 
 const API_BASE_URL = getApiBaseUrl();
+const SECONDARY_API_URL = process.env.NEXT_PUBLIC_SECONDARY_API_URL || 'https://r-diut.onrender.com/api';
+
+async function fetchWithFailover(path: string, options: RequestInit = {}): Promise<Response> {
+  const primaryUrl = `${API_BASE_URL}${path}`;
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
+    const res = await fetch(primaryUrl, { ...options, signal: controller.signal });
+    clearTimeout(timeoutId);
+    if (res.ok || res.status < 500) {
+      return res;
+    }
+  } catch (e) {
+    console.warn(`Primary backend unreachable (${primaryUrl}), trying secondary backend...`, e);
+  }
+
+  // Failover to Render.com secondary server
+  const secondaryUrl = `${SECONDARY_API_URL}${path}`;
+  try {
+    return await fetch(secondaryUrl, options);
+  } catch (err) {
+    console.error(`Secondary backend also unreachable (${secondaryUrl}):`, err);
+  }
+
+  return await fetch(primaryUrl, options);
+}
 
 function getAuthHeader(): Record<string, string> {
   if (typeof window === 'undefined') return {};
@@ -69,7 +95,7 @@ export const api = {
   // Movies
   async getMovies() {
     try {
-      const res = await fetch(`${API_BASE_URL}/movies`);
+      const res = await fetchWithFailover('/movies');
       if (!res.ok) return [];
       return await res.json();
     } catch {
@@ -79,7 +105,7 @@ export const api = {
 
   async getSeries() {
     try {
-      const res = await fetch(`${API_BASE_URL}/series`);
+      const res = await fetchWithFailover('/series');
       if (!res.ok) return [];
       return await res.json();
     } catch {
@@ -89,7 +115,7 @@ export const api = {
 
   async getContentById(id: string) {
     try {
-      const res = await fetch(`${API_BASE_URL}/content/${id}`);
+      const res = await fetchWithFailover(`/content/${id}`);
       if (!res.ok) return null;
       return await res.json();
     } catch {
@@ -98,7 +124,7 @@ export const api = {
   },
 
   async addMovie(movieData: any) {
-    const res = await fetch(`${API_BASE_URL}/movies`, {
+    const res = await fetchWithFailover('/movies', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
       body: JSON.stringify(movieData),
@@ -107,7 +133,7 @@ export const api = {
   },
 
   async updateMovie(id: string, movieData: any) {
-    const res = await fetch(`${API_BASE_URL}/movies/${id}`, {
+    const res = await fetchWithFailover(`/movies/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
       body: JSON.stringify(movieData),
@@ -116,7 +142,7 @@ export const api = {
   },
 
   async deleteMovie(id: string) {
-    const res = await fetch(`${API_BASE_URL}/movies/${id}`, {
+    const res = await fetchWithFailover(`/movies/${id}`, {
       method: 'DELETE',
       headers: { ...getAuthHeader() },
     });
@@ -128,7 +154,7 @@ export const api = {
   },
 
   async togglePublish(id: string) {
-    const res = await fetch(`${API_BASE_URL}/movies/${id}/publish`, {
+    const res = await fetchWithFailover(`/movies/${id}/publish`, {
       method: 'PATCH',
       headers: { ...getAuthHeader() },
     });
@@ -140,7 +166,7 @@ export const api = {
   },
 
   async incrementViews(id: string) {
-    const res = await fetch(`${API_BASE_URL}/movies/${id}/view`, {
+    const res = await fetchWithFailover(`/movies/${id}/view`, {
       method: 'POST',
     });
     return await res.json();
@@ -149,7 +175,7 @@ export const api = {
   // Episodes
   async getEpisodes() {
     try {
-      const res = await fetch(`${API_BASE_URL}/episodes`);
+      const res = await fetchWithFailover('/episodes');
       if (!res.ok) return [];
       return await res.json();
     } catch {
@@ -158,7 +184,7 @@ export const api = {
   },
 
   async addEpisode(episodeData: any) {
-    const res = await fetch(`${API_BASE_URL}/episodes`, {
+    const res = await fetchWithFailover('/episodes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
       body: JSON.stringify(episodeData),
@@ -167,7 +193,7 @@ export const api = {
   },
 
   async deleteEpisode(id: string) {
-    const res = await fetch(`${API_BASE_URL}/episodes/${id}`, {
+    const res = await fetchWithFailover(`/episodes/${id}`, {
       method: 'DELETE',
       headers: { ...getAuthHeader() },
     });
@@ -177,7 +203,7 @@ export const api = {
   // Genres
   async getGenres() {
     try {
-      const res = await fetch(`${API_BASE_URL}/genres`);
+      const res = await fetchWithFailover('/genres');
       if (!res.ok) return [];
       return await res.json();
     } catch {

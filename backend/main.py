@@ -49,6 +49,24 @@ def get_base_url(request: Request) -> str:
     host = request.headers.get("x-forwarded-host", request.url.netloc)
     return f"{scheme}://{host}"
 
+MIRROR_SERVER_URL = os.getenv("MIRROR_SERVER_URL", "https://r-diut.onrender.com")
+
+def replicate_to_mirror(endpoint: str, method: str = "POST", payload: dict = None):
+    if not MIRROR_SERVER_URL or "localhost" in MIRROR_SERVER_URL:
+        return
+    def _do_sync():
+        try:
+            import urllib.request
+            import json
+            url = f"{MIRROR_SERVER_URL.rstrip('/')}{endpoint}"
+            data = json.dumps(payload or {}).encode('utf-8') if payload else b""
+            req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json", "X-Sync-Token": "auto-replication"}, method=method)
+            urllib.request.urlopen(req, timeout=5)
+        except Exception as e:
+            print("Replication to mirror failed:", e)
+    import threading
+    threading.Thread(target=_do_sync, daemon=True).start()
+
 def log_security_audit(event_type: str, details: str, ip_address: str = "127.0.0.1"):
     try:
         conn = get_db_connection()
