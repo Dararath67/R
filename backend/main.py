@@ -201,6 +201,7 @@ async def upload_video(file: UploadFile = File(...), authorization: Optional[str
 async def download_remote_video_url(request: Request):
     import urllib.request
     import urllib.parse
+    import ssl
 
     data = await request.json()
     remote_url = data.get("url", "").strip()
@@ -217,18 +218,28 @@ async def download_remote_video_url(request: Request):
         safe_filename = f"dl_{uuid.uuid4().hex[:12]}{ext}"
         filepath = os.path.join(VIDEOS_DIR, safe_filename)
         
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+
         req = urllib.request.Request(
             remote_url,
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "*/*"
+            }
         )
-        with urllib.request.urlopen(req, timeout=300) as response, open(filepath, "wb") as buffer:
+        with urllib.request.urlopen(req, context=ctx, timeout=600) as response, open(filepath, "wb") as buffer:
             shutil.copyfileobj(response, buffer)
             
         url = f"http://127.0.0.1:8000/uploads/videos/{safe_filename}"
         return {"url": url, "filename": safe_filename}
     except Exception as e:
         print("download_remote_video_url error:", e)
-        raise HTTPException(status_code=500, detail=f"បរាជ័យក្នុងការទាញយកវីដេអូពី Link៖ {str(e)}")
+        raise HTTPException(
+            status_code=400, 
+            detail=f"មិនអាចទាញយកវីដេអូពី Link នេះបានទេ ({str(e)})។ ប៉ុន្តែអ្នកអាចប្រើប្រាស់ Link នេះផ្ទាល់ក្នុងប្រអប់ Video URL បានដោយមិនចាំបាច់ Download ឡើយ!"
+        )
 
 @app.post("/api/upload/image")
 async def upload_image(file: UploadFile = File(...), authorization: Optional[str] = Header(None)):

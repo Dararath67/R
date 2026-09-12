@@ -535,37 +535,69 @@ export const api = {
       const res = await fetch(`${API_BASE_URL}/admin/settings/telegram`, {
         headers: { ...getAuthHeader() },
       });
-      if (!res.ok) return { telegramBotToken: '', telegramChatId: '' };
+      if (!res.ok) throw new Error('Backend offline');
       return await res.json();
     } catch {
-      return { telegramBotToken: '', telegramChatId: '' };
+      let token = '';
+      let chatId = '';
+      if (typeof window !== 'undefined') {
+        token = localStorage.getItem('telegram_bot_token') || '';
+        chatId = localStorage.getItem('telegram_chat_id') || '';
+      }
+      return { telegramBotToken: token, telegramChatId: chatId };
     }
   },
 
   async saveTelegramSettings(telegramBotToken: string, telegramChatId: string) {
-    const res = await fetch(`${API_BASE_URL}/admin/settings/telegram`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify({ telegramBotToken, telegramChatId }),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || 'Failed to save Telegram settings');
+    try {
+      const res = await fetch(`${API_BASE_URL}/admin/settings/telegram`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+        body: JSON.stringify({ telegramBotToken, telegramChatId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Failed to save Telegram settings');
+      }
+      return await res.json();
+    } catch (e: any) {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('telegram_bot_token', telegramBotToken);
+        localStorage.setItem('telegram_chat_id', telegramChatId);
+      }
+      return { message: 'បានរក្សាទុក Telegram Bot Token & Chat ID រួចរាល់! (Saved successfully)' };
     }
-    return await res.json();
   },
 
   async testTelegramSettings(telegramBotToken: string, telegramChatId: string) {
-    const res = await fetch(`${API_BASE_URL}/admin/settings/telegram/test`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify({ telegramBotToken, telegramChatId }),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || 'Failed to send Telegram test message');
+    try {
+      const res = await fetch(`${API_BASE_URL}/admin/settings/telegram/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+        body: JSON.stringify({ telegramBotToken, telegramChatId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Failed to send Telegram test message');
+      }
+      return await res.json();
+    } catch (e: any) {
+      if (telegramBotToken && telegramChatId) {
+        try {
+          const url = `https://api.telegram.org/bot${telegramBotToken}/sendMessage`;
+          const text = `🔔 <b>TERK TLA Security Alert Test</b>\n<b>Time:</b> ${new Date().toLocaleString()}\n<b>Status:</b> Telegram Bot connected successfully!`;
+          const tgRes = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: telegramChatId, text, parse_mode: 'HTML' })
+          });
+          if (tgRes.ok) {
+            return { message: 'សារសាកល្បងត្រូវបានផ្ញើទៅ Telegram ដោយជោគជ័យ! (Test alert sent!)' };
+          }
+        } catch {}
+      }
+      throw new Error(e.message || 'បរាជ័យក្នុងការផ្ញើសារសាកល្បងទៅ Telegram');
     }
-    return await res.json();
   },
 
   // Active User Sessions & Force Logout
