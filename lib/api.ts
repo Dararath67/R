@@ -1,4 +1,12 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://us.apsara.lol:15511/api';
+const getApiBaseUrl = () => {
+  if (process.env.NEXT_PUBLIC_API_URL && process.env.NEXT_PUBLIC_API_URL.startsWith('http')) {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+  if (typeof window !== 'undefined') return '/api';
+  return 'http://us.apsara.lol:15511/api';
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 function getAuthHeader(): Record<string, string> {
   if (typeof window === 'undefined') return {};
