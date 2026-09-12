@@ -86,9 +86,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const user = await api.login(email, password, rolePreference);
       saveUserSession(user);
       return user;
-    } catch (e) {
-      console.error('Login error', e);
-      return null;
+    } catch (e: any) {
+      console.error('Login error:', e);
+      throw e;
     }
   };
 

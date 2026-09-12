@@ -48,21 +48,22 @@ export default function LoginPage() {
       return;
     }
 
-    setLoading(true);
-    setError('');
-
-    const user = await login(email.trim(), password);
-    if (user) {
-      if (user.role === 'ADMIN' || email.toLowerCase().includes('admin')) {
-        router.push('/admin');
+    try {
+      const user = await login(email.trim(), password);
+      if (user) {
+        if (user.role === 'ADMIN' || email.toLowerCase().includes('admin')) {
+          router.push('/admin');
+        } else {
+          router.push('/');
+        }
       } else {
-        router.push('/');
+        setError('អ៊ីមែល ឬលេខសម្ងាត់មិនត្រឹមត្រូវទេ ឬគណនីត្រូវបានចាក់សោ! (Invalid credentials or account locked)');
       }
-    } else {
-      setError('អ៊ីមែល ឬលេខសម្ងាត់មិនត្រឹមត្រូវទេ ឬគណនីត្រូវបានចាក់សោ! (Invalid credentials or account locked)');
-      generateCaptcha();
+    } catch (err: any) {
+      setError(err.message || 'ការចូលប្រើប្រាស់បរាជ័យ (Login failed)');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   return (
