@@ -1369,6 +1369,29 @@ def get_latest_telegram_upload():
             pass
     return LATEST_TELEGRAM_UPLOAD or {"url": "", "filename": "", "timestamp": 0}
 
+@app.get("/api/telegram/video-history")
+def get_telegram_video_history(request: Request):
+    try:
+        results = []
+        if os.path.exists(VIDEOS_DIR):
+            base_url = get_base_url(request)
+            files = sorted(os.listdir(VIDEOS_DIR), key=lambda x: os.path.getmtime(os.path.join(VIDEOS_DIR, x)), reverse=True)
+            for f in files:
+                if f.endswith(('.mp4', '.mkv', '.mov', '.webm', '.avi')):
+                    fpath = os.path.join(VIDEOS_DIR, f)
+                    mtime = int(os.path.getmtime(fpath) * 1000)
+                    size_mb = round(os.path.getsize(fpath) / (1024 * 1024), 1)
+                    results.append({
+                        "url": f"{base_url}/uploads/videos/{f}",
+                        "filename": f,
+                        "size": f"{size_mb} MB",
+                        "timestamp": mtime
+                    })
+        return results[:30]
+    except Exception as e:
+        print("get_telegram_video_history error:", e)
+        return []
+
 @app.post("/api/telegram/webhook")
 async def telegram_webhook_handler(request: Request):
     try:

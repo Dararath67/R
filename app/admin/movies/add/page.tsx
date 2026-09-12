@@ -40,6 +40,21 @@ export default function AddMoviePage() {
   // Telegram Bot Auto-Fill State
   const [lastTgTimestamp, setLastTgTimestamp] = useState<number>(Date.now());
   const [tgAutoNotice, setTgAutoNotice] = useState<string>('');
+  const [showTgPickerModal, setShowTgPickerModal] = useState(false);
+  const [tgVideoHistory, setTgVideoHistory] = useState<any[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
+  const handleOpenTgPicker = async () => {
+    setShowTgPickerModal(true);
+    setLoadingHistory(true);
+    try {
+      const history = await api.getTelegramVideoHistory();
+      setTgVideoHistory(history);
+    } catch {}
+    finally {
+      setLoadingHistory(false);
+    }
+  };
 
   React.useEffect(() => {
     const interval = setInterval(async () => {
@@ -275,6 +290,16 @@ export default function AddMoviePage() {
                     className="hidden"
                   />
                 </label>
+
+                <button
+                  type="button"
+                  onClick={handleOpenTgPicker}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-3.5 py-2.5 rounded-xl flex items-center space-x-2 text-xs shadow-md shrink-0 transition-all cursor-pointer"
+                >
+                  <Film className="w-4 h-4 text-indigo-200" />
+                  <span>បញ្ជីវីដេអូ Telegram</span>
+                </button>
+
                 <span className="text-slate-400 font-bold">ឬ</span>
                 <div className="flex items-center space-x-2 w-full">
                   <input
@@ -645,6 +670,63 @@ export default function AddMoviePage() {
             >
               យល់ព្រម
             </button>
+          </div>
+        </div>,
+        document.body
+      )}
+      {/* TELEGRAM VIDEO PICKER MODAL */}
+      {showTgPickerModal && typeof window !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[999999] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 max-w-lg w-full space-y-4 shadow-2xl text-white">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center space-x-2">
+                <Film className="w-5 h-5 text-indigo-400" />
+                <h3 className="text-sm font-bold text-white">ជ្រើសរើសវីដេអូពី Telegram Library</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowTgPickerModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 text-xs font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            {loadingHistory ? (
+              <div className="py-12 text-center text-xs text-slate-400 flex flex-col items-center justify-center space-y-2">
+                <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
+                <span>កំពុងទាញយកបញ្ជីវីដេអូពី Server...</span>
+              </div>
+            ) : tgVideoHistory.length === 0 ? (
+              <div className="py-10 text-center text-xs text-slate-400 space-y-2">
+                <p>មិនទាន់មានវីដេអូបាន Upload តាម Telegram Bot ឡើយ។</p>
+                <p className="text-[11px] text-slate-500">សូមផ្ញើឯកសារវីដេអូទៅកាន់ Telegram Bot របស់អ្នកដើម្បីបន្ថែមវីដេអូទីនេះ!</p>
+              </div>
+            ) : (
+              <div className="max-h-80 overflow-y-auto space-y-2.5 pr-1">
+                {tgVideoHistory.map((item, idx) => (
+                  <div
+                    key={idx}
+                    className="bg-slate-800/80 border border-slate-700/80 p-3 rounded-2xl flex items-center justify-between hover:border-indigo-500 transition-all"
+                  >
+                    <div className="truncate pr-3">
+                      <h4 className="text-xs font-bold text-slate-200 truncate">{item.filename}</h4>
+                      <p className="text-[10px] text-slate-400 mt-0.5 font-mono">{item.size} • {new Date(item.timestamp).toLocaleString()}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setVideoUrl(item.url);
+                        setShowTgPickerModal(false);
+                      }}
+                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shrink-0 transition-all cursor-pointer shadow-md"
+                    >
+                      ជ្រើសរើសយក
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>,
         document.body

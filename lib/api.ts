@@ -647,6 +647,16 @@ export const api = {
     }
   },
 
+  async getTelegramVideoHistory() {
+    try {
+      const res = await fetchWithFailover('/telegram/video-history');
+      if (!res.ok) return [];
+      return await res.json();
+    } catch {
+      return [];
+    }
+  },
+
   // Active User Sessions & Force Logout
   async getActiveSessions() {
     try {
