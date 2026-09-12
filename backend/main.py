@@ -1355,6 +1355,20 @@ def test_telegram_settings(payload: dict, authorization: Optional[str] = Header(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"បរាជ័យក្នុងការផ្ញើសារសាកល្បង: {str(e)}")
 
+LATEST_TELEGRAM_UPLOAD = {}
+
+@app.get("/api/telegram/latest-upload")
+def get_latest_telegram_upload():
+    global LATEST_TELEGRAM_UPLOAD
+    if not LATEST_TELEGRAM_UPLOAD:
+        try:
+            raw = get_setting("latest_telegram_upload", "{}")
+            if raw and raw != "{}":
+                LATEST_TELEGRAM_UPLOAD = json.loads(raw)
+        except Exception:
+            pass
+    return LATEST_TELEGRAM_UPLOAD or {"url": "", "filename": "", "timestamp": 0}
+
 @app.post("/api/telegram/webhook")
 async def telegram_webhook_handler(request: Request):
     try:
@@ -1414,12 +1428,20 @@ async def telegram_webhook_handler(request: Request):
                     
                 video_public_url = f"{get_base_url(request)}/uploads/videos/{safe_filename}"
                 
+                global LATEST_TELEGRAM_UPLOAD
+                LATEST_TELEGRAM_UPLOAD = {
+                    "url": video_public_url,
+                    "filename": file_name,
+                    "timestamp": int(time.time() * 1000)
+                }
+                set_setting("latest_telegram_upload", json.dumps(LATEST_TELEGRAM_UPLOAD))
+
                 reply_msg = (
                     f"✅ <b>Upload វីដេអូទៅ Server ជោគជ័យ!</b>\n\n"
                     f"📁 <b>ឈ្មោះឯកសារ:</b> {file_name}\n"
                     f"🔗 <b>Video URL (សម្រាប់បញ្ចូលក្នុង Web):</b>\n"
                     f"<code>{video_public_url}</code>\n\n"
-                    f"លោកអ្នកអាច Copy Link ខាងលើនេះទៅដាក់ក្នុង Admin Panel ទំព័របន្ថែមរឿងបានភ្លាមៗ!"
+                    f"✨ <b>Link នេះត្រូវបានបញ្ជូនចូលប្រអប់ Video ក្នុង Admin Web ដោយស្វ័យប្រវត្តិ!</b>"
                 )
                 send_tg_reply(reply_msg)
                 return {"status": "success", "url": video_public_url}

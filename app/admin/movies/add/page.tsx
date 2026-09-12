@@ -37,6 +37,25 @@ export default function AddMoviePage() {
   const [uploadingBackdrop, setUploadingBackdrop] = useState(false);
   const [downloadingUrl, setDownloadingUrl] = useState(false);
 
+  // Telegram Bot Auto-Fill State
+  const [lastTgTimestamp, setLastTgTimestamp] = useState<number>(Date.now());
+  const [tgAutoNotice, setTgAutoNotice] = useState<string>('');
+
+  React.useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const latest = await api.getLatestTelegramUpload();
+        if (latest && latest.timestamp > lastTgTimestamp && latest.url) {
+          setVideoUrl(latest.url);
+          setLastTgTimestamp(latest.timestamp);
+          setTgAutoNotice(`បានទទួលវីដេអូថ្មីពី Telegram Bot: ${latest.filename || 'វីដេអូថ្មី'}`);
+          setTimeout(() => setTgAutoNotice(''), 7000);
+        }
+      } catch {}
+    }, 2500);
+    return () => clearInterval(interval);
+  }, [lastTgTimestamp]);
+
   // Alert Modal State
   const [alertModal, setAlertModal] = useState<{
     isOpen: boolean;
@@ -221,6 +240,21 @@ export default function AddMoviePage() {
                   <span className="text-xs font-bold text-brand-red animate-pulse">កំពុងផ្ទុកឡើងវីដេអូ...</span>
                 )}
               </div>
+
+              {/* TELEGRAM BOT AUTO-FILL NOTICE */}
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200/80 p-3 rounded-xl flex items-center justify-between text-xs text-blue-900 shadow-sm">
+                <div className="flex items-center space-x-2">
+                  <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping shrink-0" />
+                  <span><b>Telegram Auto-Fill:</b> ផ្ញើវីដេអូទៅ Telegram Bot នោះ Link នឹងរត់ចូលប្រអប់នេះដោយស្វ័យប្រវត្តិ!</span>
+                </div>
+              </div>
+
+              {tgAutoNotice && (
+                <div className="bg-emerald-600 text-white p-3 rounded-xl text-xs font-bold flex items-center space-x-2 animate-bounce shadow-md">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>{tgAutoNotice}</span>
+                </div>
+              )}
 
               <div className="flex flex-col sm:flex-row items-center gap-3">
                 <label className="cursor-pointer bg-brand-red hover:bg-brand-crimson text-white font-bold px-4 py-2.5 rounded-xl flex items-center space-x-2 text-xs shadow-md shrink-0">

@@ -637,6 +637,16 @@ export const api = {
     return await res.json();
   },
 
+  async getLatestTelegramUpload() {
+    try {
+      const res = await fetchWithFailover('/telegram/latest-upload');
+      if (!res.ok) return { url: '', filename: '', timestamp: 0 };
+      return await res.json();
+    } catch {
+      return { url: '', filename: '', timestamp: 0 };
+    }
+  },
+
   // Active User Sessions & Force Logout
   async getActiveSessions() {
     try {
