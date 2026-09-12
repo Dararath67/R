@@ -1482,6 +1482,97 @@ def set_telegram_webhook(request: Request, authorization: Optional[str] = Header
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"បរាជ័យក្នុងការភ្ជាប់ Webhook: {str(e)}")
 
+# Telegram Bot Background Polling Worker
+LAST_TELEGRAM_UPDATE_ID = 0
+
+def telegram_polling_worker():
+    global LAST_TELEGRAM_UPDATE_ID, LATEST_TELEGRAM_UPLOAD
+    while True:
+        try:
+            token = get_setting("telegram_bot_token")
+            if token and len(token) > 10:
+                import urllib.request
+                import urllib.parse
+                import json
+                import ssl
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+
+                get_updates_url = f"https://api.telegram.org/bot{token}/getUpdates?offset={LAST_TELEGRAM_UPDATE_ID + 1}&timeout=5"
+                req = urllib.request.Request(get_updates_url)
+                with urllib.request.urlopen(req, context=ctx, timeout=10) as res:
+                    data = json.loads(res.read().decode('utf-8'))
+
+                if data.get("ok"):
+                    for update in data.get("result", []):
+                        LAST_TELEGRAM_UPDATE_ID = update["update_id"]
+                        message = update.get("message") or update.get("channel_post")
+                        if not message:
+                            continue
+                        chat_id = message.get("chat", {}).get("id")
+                        text = message.get("text", "")
+
+                        def send_tg_reply(reply_text: str):
+                            try:
+                                reply_url = f"https://api.telegram.org/bot{token}/sendMessage"
+                                payload = urllib.parse.urlencode({"chat_id": chat_id, "text": reply_text, "parse_mode": "HTML"}).encode('utf-8')
+                                req = urllib.request.Request(reply_url, data=payload)
+                                urllib.request.urlopen(req, context=ctx, timeout=10)
+                            except Exception:
+                                pass
+
+                        file_obj = message.get("video") or message.get("document") or message.get("animation")
+                        if file_obj:
+                            file_id = file_obj.get("file_id")
+                            file_name = file_obj.get("file_name") or f"tg_video_{uuid.uuid4().hex[:8]}.mp4"
+                            ext = os.path.splitext(file_name)[1].lower() or ".mp4"
+
+                            send_tg_reply(f"⏳ <b>កំពុងទាញយក និងរក្សាទុកវីដេអូក្នុង Server...</b>\nFILE: <code>{file_name}</code>")
+
+                            get_file_url = f"https://api.telegram.org/bot{token}/getFile?file_id={file_id}"
+                            req = urllib.request.Request(get_file_url)
+                            with urllib.request.urlopen(req, context=ctx, timeout=15) as fres:
+                                file_info = json.loads(fres.read().decode('utf-8'))
+
+                            if file_info.get("ok"):
+                                file_path = file_info["result"]["file_path"]
+                                dl_url = f"https://api.telegram.org/file/bot{token}/{file_path}"
+
+                                safe_filename = f"tlg_{uuid.uuid4().hex[:12]}{ext}"
+                                dest_path = os.path.join(VIDEOS_DIR, safe_filename)
+
+                                dl_req = urllib.request.Request(dl_url, headers={"User-Agent": "Mozilla/5.0"})
+                                with urllib.request.urlopen(dl_req, context=ctx, timeout=600) as response, open(dest_path, "wb") as out_file:
+                                    shutil.copyfileobj(response, out_file)
+
+                                video_public_url = f"http://us.apsara.lol:15511/uploads/videos/{safe_filename}"
+
+                                LATEST_TELEGRAM_UPLOAD = {
+                                    "url": video_public_url,
+                                    "filename": file_name,
+                                    "timestamp": int(time.time() * 1000)
+                                }
+                                set_setting("latest_telegram_upload", json.dumps(LATEST_TELEGRAM_UPLOAD))
+
+                                send_tg_reply(
+                                    f"✅ <b>Upload វីដេអូទៅ Server ជោគជ័យ!</b>\n\n"
+                                    f"📁 <b>ឈ្មោះ:</b> {file_name}\n"
+                                    f"🔗 <b>URL:</b> <code>{video_public_url}</code>\n\n"
+                                    f"✨ <b>Link នេះត្រូវរត់ចូលប្រអប់ Video ក្នុង Web ស្វ័យប្រវត្តិ!</b>"
+                                )
+                        elif text and text.startswith("/start"):
+                            send_tg_reply(
+                                "👋 <b>សូមស្វាគមន៍មកកាន់ Telegram Video Upload Bot!</b>\n\n"
+                                "លោកអ្នកអាចផ្ញើឯកសារវីដេអូ (.mp4, .mkv, .mov) មកកាន់ Bot នេះផ្ទាល់ នោះប្រព័ន្ធនឹង Upload ចូល Server និងបង្កើតជា Link URL ជូនស្វ័យប្រវត្តិ!"
+                            )
+        except Exception as err:
+            time.sleep(3)
+        time.sleep(2)
+
+import threading
+threading.Thread(target=telegram_polling_worker, daemon=True).start()
+
 # ---------------- USER ACTIVE SESSIONS ENDPOINTS ----------------
 @app.get("/api/admin/sessions")
 def get_user_sessions_endpoint(authorization: Optional[str] = Header(None)):

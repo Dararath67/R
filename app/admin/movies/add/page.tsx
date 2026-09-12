@@ -250,9 +250,17 @@ export default function AddMoviePage() {
               </div>
 
               {tgAutoNotice && (
-                <div className="bg-emerald-600 text-white p-3 rounded-xl text-xs font-bold flex items-center space-x-2 animate-bounce shadow-md">
-                  <CheckCircle2 className="w-4 h-4 shrink-0" />
-                  <span>{tgAutoNotice}</span>
+                <div className="bg-emerald-600 text-white p-4 rounded-2xl text-xs font-extrabold flex items-center justify-between border-2 border-emerald-400 shadow-xl animate-fade-in">
+                  <div className="flex items-center space-x-2.5">
+                    <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+                      <CheckCircle2 className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <h5 className="font-bold text-sm">បានជោគជ័យ! (Upload Successful)</h5>
+                      <p className="text-[11px] text-emerald-100 font-normal">{tgAutoNotice}</p>
+                    </div>
+                  </div>
+                  <span className="px-2.5 py-1 bg-white/20 rounded-lg text-[10px] uppercase font-mono">Auto-Filled</span>
                 </div>
               )}
 
