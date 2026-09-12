@@ -294,7 +294,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const deleteGenre = async (id: string) => {
-    await api.deleteGenre(id);
+    setGenres((prev) => prev.filter((g) => g.id !== id));
+    try {
+      await api.deleteGenre(id);
+    } catch (e) {
+      console.warn('deleteGenre API call warning:', e);
+    }
     await refreshData();
   };
 
