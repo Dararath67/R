@@ -3154,8 +3154,18 @@ def bulk_crawl_movies_endpoint(payload: dict, authorization: Optional[str] = Hea
         raw_title = entry.get('title', {}).get('$t', '') if isinstance(entry.get('title'), dict) else ""
         extracted = extract_media_from_webpage(post_link)
         
-        final_title = extracted.get('title') or raw_title or f"ភាពយន្ត {idx}"
-        video_url = extracted.get('videoUrl') or ""
+        final_title = (extracted.get('title') or raw_title or "").strip()
+        if not final_title:
+            final_title = f"ភាពយន្ត {idx}"
+
+        # If post has a specific slug/post ID like blog-post_240.html, append it if not already in title
+        slug_m = re.search(r'blog-post_(\d+)', post_link)
+        if slug_m:
+            slug_num = slug_m.group(1)
+            if slug_num not in final_title:
+                final_title = f"{final_title} #{slug_num}"
+
+        video_url = (extracted.get('videoUrl') or "").strip()
         poster_url = extracted.get('posterUrl') or ""
         backdrop_url = extracted.get('backdropUrl') or poster_url
         release_year = extracted.get('releaseYear') or datetime.now().year
@@ -3165,8 +3175,8 @@ def bulk_crawl_movies_endpoint(payload: dict, authorization: Optional[str] = Hea
         if not video_url:
             continue
 
-        # Check for duplicate in database
-        cursor.execute("SELECT id FROM content WHERE video_url = ? OR (LOWER(title) = LOWER(?) AND release_year = ?)", (video_url, final_title, release_year))
+        # Check for duplicate video stream in database (only video_url is unique)
+        cursor.execute("SELECT id FROM content WHERE video_url = ?", (video_url,))
         existing_row = cursor.fetchone()
 
         item_status = "already_exists" if existing_row else "ready"
@@ -3248,7 +3258,7 @@ def bulk_import_movies_endpoint(payload: dict, authorization: Optional[str] = He
         rating = float(item.get("rating") or 8.8)
         duration = item.get("duration") or "1h 45m"
 
-        cursor.execute("SELECT id FROM content WHERE video_url = ? OR (LOWER(title) = LOWER(?) AND release_year = ?)", (video_url, title, release_year))
+        cursor.execute("SELECT id FROM content WHERE video_url = ?", (video_url,))
         if cursor.fetchone():
             duplicates += 1
             continue
