@@ -12,6 +12,7 @@ from typing import Optional
 from urllib.parse import quote
 
 import jwt
+import re
 import time
 import logging
 
@@ -417,6 +418,65 @@ async def upload_image(request: Request, file: UploadFile = File(...), authoriza
         
     url = f"{get_base_url(request)}/uploads/images/{safe_filename}"
     return {"url": url, "filename": safe_filename}
+
+# ---------------- AUTO EXTRACT VIDEO CAPTION & METADATA ----------------
+@app.post("/api/video/extract-caption")
+async def extract_video_caption_endpoint(request: Request):
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+        
+    raw_url = (data.get("url") or "").strip()
+    raw_name = (data.get("filename") or "").strip()
+    raw_caption = (data.get("caption") or "").strip()
+    
+    # 1. If explicit caption is provided (e.g. from Telegram)
+    if raw_caption:
+        lines = [line.strip() for line in raw_caption.split("\n") if line.strip()]
+        first_line = lines[0] if lines else "ភាពយន្តថ្មី"
+        clean_title = re.sub(r'#\w+', '', first_line).strip()
+        clean_title = re.sub(r'^(🎬|📺|🎥|🔥|✨|👉)\s*', '', clean_title).strip()
+        return {
+            "title": clean_title or "ភាពយន្តថ្មី",
+            "description": raw_caption,
+            "caption": raw_caption,
+            "releaseYear": datetime.now().year,
+            "genres": ["Action", "Drama"]
+        }
+        
+    target_str = raw_name or (os.path.basename(raw_url.split("?")[0]) if raw_url else "")
+    
+    # Strip extension
+    name_no_ext = os.path.splitext(target_str)[0] if target_str else ""
+    
+    # Remove technical prefixes
+    name_no_ext = re.sub(r'^(web_|dl_|tlg_|tlg_web_|poster_)+', '', name_no_ext, flags=re.IGNORECASE)
+    
+    # Extract 4-digit year if present (1900-2099)
+    year_match = re.search(r'\b(19\d\d|20\d\d)\b', name_no_ext)
+    extracted_year = int(year_match.group(1)) if year_match else datetime.now().year
+    
+    # Clean technical video tags
+    clean_name = re.sub(r'(?i)\b(1080p|720p|480p|2160p|4k|hd|fhd|uhd|webrip|web-dl|bluray|brrip|x264|x265|hevc|aac|dvdrip|h264|h265|remux|hdtv|camrip|hdrip|proper|repack|complete|sub|dub|khmer)\b', ' ', name_no_ext)
+    clean_name = re.sub(r'[\._\-\+\[\]\(\)]', ' ', clean_name)
+    clean_name = re.sub(r'\s+', ' ', clean_name).strip()
+    
+    if clean_name:
+        words = clean_name.split()
+        clean_title = " ".join([w.capitalize() if w.isascii() else w for w in words])
+    else:
+        clean_title = "ភាពយន្តថ្មី"
+        
+    formatted_description = f"ទស្សនា {clean_title} កម្រិតរូបភាពច្បាស់ត្រជាក់ភ្នែក (HD/1080p) ដោយឥតគិតថ្លៃ និងគ្មានផ្ទាំងពាណិជ្ជកម្មរំខាននៅលើ TerkTla Hub។"
+    
+    return {
+        "title": clean_title,
+        "description": formatted_description,
+        "caption": clean_title,
+        "releaseYear": extracted_year,
+        "genres": ["Action", "Drama"]
+    }
 
 # ---------------- NOTIFICATIONS ----------------
 @app.get("/api/notifications")
@@ -1514,9 +1574,29 @@ def get_telegram_video_history(request: Request):
                     fpath = os.path.join(VIDEOS_DIR, f)
                     mtime = int(os.path.getmtime(fpath) * 1000)
                     size_mb = round(os.path.getsize(fpath) / (1024 * 1024), 1)
+                    
+                    # Clean title derivation
+                    name_no_ext = os.path.splitext(f)[0]
+                    name_no_ext = re.sub(r'^(web_|dl_|tlg_|tlg_web_|poster_)+', '', name_no_ext, flags=re.IGNORECASE)
+                    clean_name = re.sub(r'(?i)\b(1080p|720p|480p|2160p|4k|hd|fhd|uhd|webrip|web-dl|bluray|brrip|x264|x265|hevc|aac|dvdrip|h264|h265|remux)\b', ' ', name_no_ext)
+                    clean_name = re.sub(r'[\._\-\+\[\]\(\)]', ' ', clean_name)
+                    clean_name = re.sub(r'\s+', ' ', clean_name).strip()
+                    title_derived = clean_name.title() if clean_name else f
+                    
+                    # Find poster if exists
+                    poster_url = ""
+                    base_stem = os.path.splitext(f)[0]
+                    for p_prefix in [f"poster_{base_stem}.jpg", f"poster_ff_{base_stem}.jpg", f"poster_tg_{base_stem}.jpg", f"poster_web_{base_stem}.jpg"]:
+                        if os.path.exists(os.path.join(IMAGES_DIR, p_prefix)):
+                            poster_url = f"{base_url}/uploads/images/{p_prefix}"
+                            break
+
                     results.append({
                         "url": f"{base_url}/uploads/videos/{f}",
                         "filename": f,
+                        "title": title_derived,
+                        "caption": title_derived,
+                        "posterUrl": poster_url,
                         "size": f"{size_mb} MB",
                         "timestamp": mtime
                     })
@@ -1886,8 +1966,13 @@ def handle_telegram_update(update: dict, token: str, base_domain: str = "http://
         file_name = file_obj.get("file_name") or f"tg_video_{uuid.uuid4().hex[:8]}.mp4"
         ext = os.path.splitext(file_name)[1].lower() or ".mp4"
 
+        tg_caption = (message.get("caption") or "").strip()
         current_mode = session.get("mode", "upload_only")
         current_title = session.get("title")
+        if not current_title and tg_caption:
+            current_title = tg_caption.split("\n")[0].strip()
+            current_title = re.sub(r'#\w+', '', current_title).strip()
+            current_title = re.sub(r'^(🎬|📺|🎥|🔥|✨|👉)\s*', '', current_title).strip()
 
         send_tg_msg(chat_id, f"⏳ <b>កំពុងទាញយក និងរក្សាទុកវីដេអូក្នុង Server...</b>\nFILE: <code>{file_name}</code>")
 
@@ -1971,6 +2056,8 @@ def handle_telegram_update(update: dict, token: str, base_domain: str = "http://
                 "url": video_public_url,
                 "posterUrl": auto_poster_url,
                 "filename": file_name,
+                "caption": tg_caption or current_title or file_name,
+                "title": current_title or file_name,
                 "timestamp": int(time.time() * 1000)
             }
             set_setting("latest_telegram_upload", json.dumps(LATEST_TELEGRAM_UPLOAD))

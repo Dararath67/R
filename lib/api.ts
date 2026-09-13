@@ -1,5 +1,10 @@
 const getApiBaseUrl = () => {
-  if (typeof window !== 'undefined') return '/api';
+  if (typeof window !== 'undefined') {
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      return 'http://localhost:8000/api';
+    }
+    return process.env.NEXT_PUBLIC_API_URL || 'http://us.apsara.lol:15511/api';
+  }
   return process.env.NEXT_PUBLIC_API_URL || 'http://us.apsara.lol:15511/api';
 };
 
@@ -10,7 +15,7 @@ async function fetchWithFailover(path: string, options: RequestInit = {}): Promi
   const primaryUrl = `${API_BASE_URL}${path}`;
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3500);
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
     const res = await fetch(primaryUrl, { ...options, signal: controller.signal });
     clearTimeout(timeoutId);
     if (res.ok || res.status < 500) {
@@ -19,6 +24,15 @@ async function fetchWithFailover(path: string, options: RequestInit = {}): Promi
   } catch (e) {
     console.warn(`Primary backend unreachable (${primaryUrl}), trying secondary backend...`, e);
   }
+
+  // Fallback to relative path in case of Next.js rewrites proxy
+  try {
+    const relativeUrl = `/api${path}`;
+    const resRel = await fetch(relativeUrl, options);
+    if (resRel.ok || resRel.status < 500) {
+      return resRel;
+    }
+  } catch {}
 
   // Failover to Render.com secondary server
   const secondaryUrl = `${SECONDARY_API_URL}${path}`;
@@ -46,25 +60,63 @@ function getAuthHeader(): Record<string, string> {
 }
 
 export const api = {
-  // Direct File Uploads
-  async uploadVideo(file: File) {
+  // Direct File Uploads with Resilient Failover & Progress
+  async uploadVideo(file: File, onProgress?: (percent: number) => void): Promise<any> {
     const formData = new FormData();
     formData.append('file', file);
 
-    const res = await fetch(`${API_BASE_URL}/upload/video`, {
-      method: 'POST',
-      headers: { ...getAuthHeader() },
-      body: formData,
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || 'បរាជ័យក្នុងការ Upload វីដេអូ (Video upload failed)');
+    const tryUpload = async (baseUrl: string): Promise<any> => {
+      return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${baseUrl}/upload/video`);
+        const auth = getAuthHeader();
+        if (auth.Authorization) {
+          xhr.setRequestHeader('Authorization', auth.Authorization);
+        }
+        xhr.upload.onprogress = (evt) => {
+          if (evt.lengthComputable && onProgress) {
+            const percent = Math.round((evt.loaded / evt.total) * 100);
+            onProgress(percent);
+          }
+        };
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              resolve(JSON.parse(xhr.responseText));
+            } catch {
+              resolve({ url: `/uploads/videos/${file.name}` });
+            }
+          } else {
+            let detail = 'បរាជ័យក្នុងការ Upload វីដេអូ';
+            try {
+              const parsed = JSON.parse(xhr.responseText);
+              if (parsed.detail) detail = parsed.detail;
+            } catch {}
+            reject(new Error(detail));
+          }
+        };
+        xhr.onerror = () => reject(new Error('Network error during video upload'));
+        xhr.ontimeout = () => reject(new Error('Video upload timed out'));
+        xhr.timeout = 180000; // 3 minutes timeout for large files
+        xhr.send(formData);
+      });
+    };
+
+    try {
+      return await tryUpload(API_BASE_URL);
+    } catch (err1) {
+      console.warn('Primary upload failed, attempting Next.js proxy upload...', err1);
+      try {
+        return await tryUpload('/api');
+      } catch (err2) {
+        console.warn('Proxy upload failed, attempting secondary server...', err2);
+        return await tryUpload(SECONDARY_API_URL);
+      }
     }
-    return await res.json();
   },
 
   async downloadVideoFromUrl(url: string) {
-    const res = await fetch(`${API_BASE_URL}/upload/download-url`, {
+    const res = await fetchWithFailover('/upload/download-url', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
       body: JSON.stringify({ url }),
@@ -76,20 +128,88 @@ export const api = {
     return await res.json();
   },
 
-  async uploadImage(file: File) {
+  async uploadImage(file: File, onProgress?: (percent: number) => void): Promise<any> {
     const formData = new FormData();
     formData.append('file', file);
 
-    const res = await fetch(`${API_BASE_URL}/upload/image`, {
-      method: 'POST',
-      headers: { ...getAuthHeader() },
-      body: formData,
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || 'បរាជ័យក្នុងការ Upload រូបភាព (Image upload failed)');
+    const tryUpload = async (baseUrl: string): Promise<any> => {
+      return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${baseUrl}/upload/image`);
+        const auth = getAuthHeader();
+        if (auth.Authorization) {
+          xhr.setRequestHeader('Authorization', auth.Authorization);
+        }
+        xhr.upload.onprogress = (evt) => {
+          if (evt.lengthComputable && onProgress) {
+            const percent = Math.round((evt.loaded / evt.total) * 100);
+            onProgress(percent);
+          }
+        };
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              resolve(JSON.parse(xhr.responseText));
+            } catch {
+              resolve({ url: `/uploads/images/${file.name}` });
+            }
+          } else {
+            let detail = 'បរាជ័យក្នុងការ Upload រូបភាព';
+            try {
+              const parsed = JSON.parse(xhr.responseText);
+              if (parsed.detail) detail = parsed.detail;
+            } catch {}
+            reject(new Error(detail));
+          }
+        };
+        xhr.onerror = () => reject(new Error('Network error during image upload'));
+        xhr.ontimeout = () => reject(new Error('Image upload timed out'));
+        xhr.timeout = 60000;
+        xhr.send(formData);
+      });
+    };
+
+    try {
+      return await tryUpload(API_BASE_URL);
+    } catch (err1) {
+      try {
+        return await tryUpload('/api');
+      } catch (err2) {
+        return await tryUpload(SECONDARY_API_URL);
+      }
     }
-    return await res.json();
+  },
+
+  // Auto-Extract Video Caption & Metadata from Link or Filename
+  async extractVideoCaption(data: { url?: string; filename?: string; caption?: string }) {
+    try {
+      const res = await fetchWithFailover('/video/extract-caption', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+        body: JSON.stringify(data),
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      console.warn('extractVideoCaption error:', e);
+    }
+
+    // Client-side fallback extractor
+    const raw = data.caption || data.filename || (data.url ? data.url.split('/').pop()?.split('?')[0] : '') || '';
+    const noExt = raw.replace(/\.[^/.]+$/, '').replace(/^(web_|dl_|tlg_|tlg_web_|poster_)+/gi, '');
+    const clean = noExt.replace(/(1080p|720p|480p|2160p|4k|hd|fhd|webrip|web-dl|bluray|x264|x265|aac)/gi, ' ')
+      .replace(/[._\-+\[\]\(\)]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const yearMatch = noExt.match(/\b(19\d\d|20\d\d)\b/);
+    return {
+      title: clean || 'ភាពយន្តថ្មី',
+      description: `ទស្សនា ${clean || 'ភាពយន្តថ្មី'} កម្រិតច្បាស់ HD ដោយឥតគិតថ្លៃនៅលើ TerkTla Hub។`,
+      caption: clean || 'ភាពយន្តថ្មី',
+      releaseYear: yearMatch ? parseInt(yearMatch[1]) : new Date().getFullYear(),
+      genres: ['Action', 'Drama'],
+    };
   },
 
   // Movies
