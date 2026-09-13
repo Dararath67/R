@@ -3144,6 +3144,7 @@ def bulk_crawl_movies_endpoint(payload: dict, authorization: Optional[str] = Hea
 
     imported_count = 0
     duplicate_count = 0
+    seen_in_current_batch = set()
 
     for idx, entry in enumerate(entries, 1):
         links = [l.get('href') for l in entry.get('link', []) if l.get('rel') == 'alternate' or not l.get('rel')]
@@ -3175,33 +3176,37 @@ def bulk_crawl_movies_endpoint(payload: dict, authorization: Optional[str] = Hea
         if not video_url:
             continue
 
-        # Check for duplicate video stream in database (only video_url is unique)
-        cursor.execute("SELECT id FROM content WHERE video_url = ?", (video_url,))
+        # Check for duplicate video stream in database (Strict skip if already present in DB or already seen in batch)
+        cursor.execute("SELECT id FROM content WHERE video_url = ? OR trailer_url = ?", (video_url, video_url))
         existing_row = cursor.fetchone()
 
-        item_status = "already_exists" if existing_row else "ready"
+        is_duplicate = bool(existing_row) or (video_url in seen_in_current_batch)
+        item_status = "already_exists" if is_duplicate else "ready"
         created_movie_id = existing_row["id"] if existing_row else ""
 
-        if auto_save and not existing_row:
-            new_id = "m" + str(int(datetime.now().timestamp() * 1000) + idx)
-            created_date = datetime.now().strftime("%Y-%m-%d")
-            cursor.execute('''
-                INSERT INTO content (
-                    id, title, description, poster_url, backdrop_url, trailer_url, video_url,
-                    release_year, rating, duration, type, genres, is_featured, is_trending,
-                    is_popular, is_latest, is_published, views, cast, director, created_at,
-                    approval_status
-                ) VALUES (?, ?, ?, ?, ?, '', ?, ?, 8.8, '1h 45m', 'movie', ?, 0, 1, 1, 1, 1, 0, '[]', 'Director', ?, 'approved')
-            ''', (
-                new_id, final_title, description, poster_url, backdrop_url, video_url,
-                release_year, json.dumps(genres), created_date
-            ))
-            conn.commit()
-            item_status = "imported"
-            created_movie_id = new_id
-            imported_count += 1
-        elif existing_row:
+        if is_duplicate:
             duplicate_count += 1
+            # STRICT SKIP: Do not insert into database
+        else:
+            seen_in_current_batch.add(video_url)
+            if auto_save:
+                new_id = "m" + str(int(datetime.now().timestamp() * 1000) + idx)
+                created_date = datetime.now().strftime("%Y-%m-%d")
+                cursor.execute('''
+                    INSERT INTO content (
+                        id, title, description, poster_url, backdrop_url, trailer_url, video_url,
+                        release_year, rating, duration, type, genres, is_featured, is_trending,
+                        is_popular, is_latest, is_published, views, cast, director, created_at,
+                        approval_status
+                    ) VALUES (?, ?, ?, ?, ?, '', ?, ?, 8.8, '1h 45m', 'movie', ?, 0, 1, 1, 1, 1, 0, '[]', 'Director', ?, 'approved')
+                ''', (
+                    new_id, final_title, description, poster_url, backdrop_url, video_url,
+                    release_year, json.dumps(genres), created_date
+                ))
+                conn.commit()
+                item_status = "imported"
+                created_movie_id = new_id
+                imported_count += 1
 
         results.append({
             "id": created_movie_id or f"temp_{idx}",
@@ -3233,6 +3238,7 @@ def bulk_crawl_movies_endpoint(payload: dict, authorization: Optional[str] = Hea
 def bulk_import_movies_endpoint(payload: dict, authorization: Optional[str] = Header(None)):
     """
     Bulk saves a selected list of scraped movies into the database.
+    Strictly skips any movies already existing in the database.
     """
     require_admin_role(authorization)
     items = payload.get("items", [])
@@ -3243,11 +3249,16 @@ def bulk_import_movies_endpoint(payload: dict, authorization: Optional[str] = He
     cursor = conn.cursor()
     imported = 0
     duplicates = 0
+    imported_in_batch = set()
 
     for idx, item in enumerate(items, 1):
         title = (item.get("title") or "").strip()
         video_url = (item.get("videoUrl") or "").strip()
         if not title or not video_url:
+            continue
+
+        if video_url in imported_in_batch:
+            duplicates += 1
             continue
 
         poster_url = item.get("posterUrl") or ""
@@ -3258,11 +3269,12 @@ def bulk_import_movies_endpoint(payload: dict, authorization: Optional[str] = He
         rating = float(item.get("rating") or 8.8)
         duration = item.get("duration") or "1h 45m"
 
-        cursor.execute("SELECT id FROM content WHERE video_url = ?", (video_url,))
+        cursor.execute("SELECT id FROM content WHERE video_url = ? OR trailer_url = ?", (video_url, video_url))
         if cursor.fetchone():
             duplicates += 1
             continue
 
+        imported_in_batch.add(video_url)
         new_id = "m" + str(int(datetime.now().timestamp() * 1000) + idx)
         created_date = datetime.now().strftime("%Y-%m-%d")
         cursor.execute('''
@@ -3285,7 +3297,8 @@ def bulk_import_movies_endpoint(payload: dict, authorization: Optional[str] = He
         "status": "success",
         "imported": imported,
         "duplicates": duplicates,
-        "message": f"បាន Import ភាពយន្ត {imported} រឿងដោយជោគជ័យ!"
+        "message": f"បាន Import ភាពយន្ត {imported} រឿងដោយជោគជ័យ (បាន Skip រឿងដែលមានស្រាប់ {duplicates} រឿង)!"
     }
+
 
 

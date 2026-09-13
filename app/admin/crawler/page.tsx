@@ -81,13 +81,13 @@ export default function AdminCrawlerPage() {
       if (autoSave) {
         setStatusMessage({
           type: 'success',
-          text: `ស្កេន និងបាន Import ភាពយន្តដោយស្វ័យប្រវត្តចំនួន ${res.importedCount} រឿង (${res.duplicateCount} រឿងមានក្នុងប្រព័ន្ធរួចហើយ)!`,
+          text: `ស្កេន និងបាន Import ភាពយន្តដោយស្វ័យប្រវត្តចំនួន ${res.importedCount} រឿង (បានរំលង/Skip ${res.duplicateCount} រឿងដែលមានក្នុងប្រព័ន្ធរួចហើយ)!`,
         });
         if (refreshData) refreshData();
       } else {
         setStatusMessage({
           type: 'info',
-          text: `ស្កេនឃើញភាពយន្តចំនួន ${res.totalScanned} រឿង (${res.duplicateCount} រឿងមានក្នុងប្រព័ន្ធរួចហើយ)!`,
+          text: `ស្កេនឃើញភាពយន្តចំនួន ${res.totalScanned} រឿង (បានរកឃើញ ${res.duplicateCount} រឿងមានក្នុងប្រព័ន្ធរួចហើយ នឹងត្រូវ Skip)!`,
         });
       }
     } catch (err: any) {
@@ -138,7 +138,7 @@ export default function AdminCrawlerPage() {
 
       setStatusMessage({
         type: 'success',
-        text: `បាន Import ភាពយន្ត ${res.imported} រឿងចូលក្នុង Database ដោយជោគជ័យ! (${res.duplicates} រឿងមានរួចហើយ)`,
+        text: `បាន Import ភាពយន្ត ${res.imported} រឿងចូលក្នុង Database ដោយជោគជ័យ! (បានរំលង/Skip ${res.duplicates} រឿងដែលមានរួចហើយ)`,
       });
 
       if (refreshData) refreshData();
