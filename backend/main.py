@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, File, UploadFile, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 import sqlite3
 import json
@@ -211,6 +211,54 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# High-Performance Smooth Video Streaming Endpoint with Range Requests & Buffer Caching
+@app.get("/uploads/videos/{filename}")
+async def stream_video_file(filename: str, request: Request):
+    filepath = os.path.join(VIDEOS_DIR, os.path.basename(filename))
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="Video file not found")
+    
+    file_size = os.path.getsize(filepath)
+    range_header = request.headers.get("range")
+    
+    if range_header:
+        byte_range = range_header.replace("bytes=", "").split("-")
+        start = int(byte_range[0])
+        end = int(byte_range[1]) if byte_range[1] else min(start + 1024 * 1024 * 3 - 1, file_size - 1)
+        length = end - start + 1
+        
+        def iterfile():
+            with open(filepath, "rb") as f:
+                f.seek(start)
+                remaining = length
+                while remaining > 0:
+                    chunk_size = min(remaining, 512 * 1024)
+                    data = f.read(chunk_size)
+                    if not data:
+                        break
+                    remaining -= len(data)
+                    yield data
+                    
+        headers = {
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(length),
+            "Content-Type": "video/mp4",
+            "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
+            "Access-Control-Allow-Origin": "*",
+        }
+        return StreamingResponse(iterfile(), status_code=206, headers=headers)
+    
+    return FileResponse(
+        filepath,
+        media_type="video/mp4",
+        headers={
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
+            "Access-Control-Allow-Origin": "*",
+        }
+    )
 
 # Serve Static Upload Files
 app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")

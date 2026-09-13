@@ -78,8 +78,14 @@ export default function WatchPage() {
   const savedProgressKey = activeEpisode ? `${item?.id}_${activeEpisode.id}` : item?.id;
   const savedTime = savedProgressKey ? progressMap[savedProgressKey]?.currentTime || 0 : 0;
 
+  const lastHistorySaveRef = React.useRef<number>(0);
+
   const handleTimeUpdate = (currentTime: number, duration: number) => {
     if (!item || duration <= 0) return;
+    const now = Date.now();
+    if (now - lastHistorySaveRef.current < 4000) return; // Save at most once every 4 seconds
+    lastHistorySaveRef.current = now;
+
     const progress = Math.round((currentTime / duration) * 100);
 
     saveProgressItem({

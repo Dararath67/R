@@ -181,14 +181,20 @@ export const CustomVideoPlayer: React.FC<CustomVideoPlayerProps> = ({
     }
   };
 
+  const lastParentUpdateRef = useRef<number>(0);
+
   const handleTimeUpdate = () => {
     if (!videoRef.current) return;
     const cur = videoRef.current.currentTime;
     const dur = videoRef.current.duration || duration || 0;
     setCurrentTime(cur);
     setDuration(dur);
-    if (onTimeUpdate) {
-      onTimeUpdate(cur, dur);
+    const now = Date.now();
+    if (now - lastParentUpdateRef.current > 1000) {
+      lastParentUpdateRef.current = now;
+      if (onTimeUpdate) {
+        onTimeUpdate(cur, dur);
+      }
     }
   };
 
