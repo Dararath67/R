@@ -230,24 +230,29 @@ async def upload_video(request: Request, file: UploadFile = File(...), authoriza
     with open(filepath, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    # Auto transcode .mov / .mkv / .avi to web-native .mp4 H.264/AAC for 100% browser compatibility
-    if ext in [".mov", ".mkv", ".avi", ".flv"]:
-        try:
-            import subprocess
-            mp4_filename = f"web_{uuid.uuid4().hex}.mp4"
-            mp4_filepath = os.path.join(VIDEOS_DIR, mp4_filename)
-            # Try fast remux / transcode to H.264 MP4
-            cmd_conv = ["ffmpeg", "-y", "-i", filepath, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26", "-c:a", "aac", mp4_filepath]
-            res_conv = subprocess.run(cmd_conv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
-            if res_conv.returncode == 0 and os.path.exists(mp4_filepath) and os.path.getsize(mp4_filepath) > 0:
-                try:
-                    os.remove(filepath)
-                except Exception:
-                    pass
-                safe_filename = mp4_filename
-                filepath = mp4_filepath
-        except Exception as e_conv:
-            print("Video transcode to MP4 error:", e_conv)
+    # Auto transcode & optimize all video formats (.mov, .mkv, .avi, .mp4) to web-native faststart MP4 H.264/AAC for ultra-smooth streaming
+    try:
+        import subprocess
+        mp4_filename = f"web_{uuid.uuid4().hex}.mp4"
+        mp4_filepath = os.path.join(VIDEOS_DIR, mp4_filename)
+        # Ultra smooth H.264 Web MP4 with +faststart moov atom and yuv420p hardware decoding
+        cmd_conv = [
+            "ffmpeg", "-y", "-i", filepath,
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+            "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+            "-c:a", "aac", "-b:a", "128k", "-ar", "44100",
+            mp4_filepath
+        ]
+        res_conv = subprocess.run(cmd_conv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
+        if res_conv.returncode == 0 and os.path.exists(mp4_filepath) and os.path.getsize(mp4_filepath) > 0:
+            try:
+                os.remove(filepath)
+            except Exception:
+                pass
+            safe_filename = mp4_filename
+            filepath = mp4_filepath
+    except Exception as e_conv:
+        print("Video transcode to MP4 error:", e_conv)
         
     relative_url = f"/uploads/videos/{safe_filename}"
     poster_url = ""

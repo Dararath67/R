@@ -321,7 +321,8 @@ export const CustomVideoPlayer: React.FC<CustomVideoPlayerProps> = ({
             ref={videoRef}
             src={activeSrc}
             poster={poster}
-            preload="metadata"
+            preload="auto"
+            playsInline
             onLoadedMetadata={handleLoadedMetadata}
             onTimeUpdate={handleTimeUpdate}
             onPlay={() => setIsPlaying(true)}
@@ -331,7 +332,7 @@ export const CustomVideoPlayer: React.FC<CustomVideoPlayerProps> = ({
               if (onNextEpisode) onNextEpisode();
             }}
             onError={handleVideoError}
-            className="w-full h-full object-contain bg-slate-950"
+            className="w-full h-full object-contain bg-slate-950 will-change-transform transform-gpu"
           />
 
           {/* Skip Intro Button Overlay */}
