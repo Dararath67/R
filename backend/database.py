@@ -130,6 +130,7 @@ def revoke_session(session_id: str):
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("DELETE FROM user_sessions WHERE id = ? OR jti = ?", (session_id, session_id))
+        cursor.execute("INSERT OR REPLACE INTO revoked_tokens (jti, revoked_at) VALUES (?, ?)", (session_id, datetime.now().isoformat()))
         conn.commit()
         conn.close()
         return True
@@ -143,10 +144,10 @@ def is_session_valid(jti: str) -> bool:
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT id FROM user_sessions WHERE jti = ? OR id = ?", (jti, jti))
+        cursor.execute("SELECT 1 FROM revoked_tokens WHERE jti = ?", (jti,))
         row = cursor.fetchone()
         conn.close()
-        return row is not None
+        return row is None
     except Exception:
         return True
 
@@ -334,6 +335,14 @@ def toggle_favorite_in_db(user_id: str, content_id: str) -> dict:
             user_agent TEXT,
             last_active TEXT NOT NULL,
             jti TEXT
+        )
+    ''')
+
+    # Revoked Tokens Blacklist Table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS revoked_tokens (
+            jti TEXT PRIMARY KEY,
+            revoked_at TEXT NOT NULL
         )
     ''')
 
