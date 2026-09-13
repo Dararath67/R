@@ -265,6 +265,76 @@ async def stream_video_file(filename: str, request: Request):
 # Serve Static Upload Files
 app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 
+# ---------------- UNIVERSAL VIDEO STREAMING PROXY ----------------
+@app.get("/api/proxy/video")
+async def proxy_external_video(url: str, request: Request):
+    """
+    Universal High-Performance Streaming Proxy for external / remote CDN video streams
+    (e.g., 1a-1791.com, Rumble, third-party blogs/hosts) to bypass CORS and hotlink restrictions.
+    Supports HTTP 206 Range requests, fast 512KB chunking, and hardware-accelerated playback.
+    """
+    clean_url = (url or "").strip()
+    if not clean_url or not (clean_url.startswith("http://") or clean_url.startswith("https://")):
+        raise HTTPException(status_code=400, detail="Valid video URL required (http:// or https://)")
+
+    import urllib.request
+    import urllib.parse
+    import ssl
+
+    # If it's a webpage article link, auto-extract the direct video stream first!
+    if not any(clean_url.lower().split("?")[0].endswith(ext) for ext in ALLOWED_VIDEO_EXT):
+        extracted = extract_media_from_webpage(clean_url)
+        if extracted.get("videoUrl"):
+            clean_url = extracted["videoUrl"]
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    parsed = urllib.parse.urlparse(clean_url)
+    req_headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "*/*",
+        "Referer": f"{parsed.scheme}://{parsed.netloc}/",
+    }
+
+    range_header = request.headers.get("range")
+    if range_header:
+        req_headers["Range"] = range_header
+
+    try:
+        req = urllib.request.Request(clean_url, headers=req_headers)
+        remote_res = urllib.request.urlopen(req, context=ctx, timeout=30)
+        
+        status_code = remote_res.status or (206 if range_header else 200)
+        res_headers = {
+            "Accept-Ranges": "bytes",
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
+            "Content-Type": remote_res.headers.get("Content-Type") or "video/mp4",
+        }
+
+        if remote_res.headers.get("Content-Range"):
+            res_headers["Content-Range"] = remote_res.headers.get("Content-Range")
+        if remote_res.headers.get("Content-Length"):
+            res_headers["Content-Length"] = remote_res.headers.get("Content-Length")
+
+        def iter_stream():
+            try:
+                while True:
+                    chunk = remote_res.read(512 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
+            finally:
+                remote_res.close()
+
+        return StreamingResponse(iter_stream(), status_code=status_code, headers=res_headers)
+    except Exception as e:
+        print("proxy_external_video error:", e)
+        raise HTTPException(status_code=502, detail=f"Failed to stream external video: {str(e)}")
+
+
 # ---------------- DIRECT FILE UPLOADS ----------------
 @app.post("/api/upload/video")
 async def upload_video(request: Request, file: UploadFile = File(...), authorization: Optional[str] = Header(None)):

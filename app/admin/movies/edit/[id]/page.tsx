@@ -484,13 +484,46 @@ export default function EditMoviePage() {
               </div>
 
               {videoUrl && (
-                <div className="flex items-center space-x-2 text-xs text-emerald-700 bg-emerald-50 p-2.5 rounded-xl border border-emerald-200 font-semibold truncate">
-                  <CheckCircle2 className="w-4 h-4 flex-shrink-0 text-emerald-600" />
-                  <span className="truncate">
-                    {videoUrl.includes('/uploads/videos/')
-                      ? `វីដេអូបានរក្សាទុកក្នុង Server: ${videoUrl}`
-                      : `វីដេអូត្រៀមរួចរាល់: ${videoUrl}`}
-                  </span>
+                <div className="space-y-3">
+                  <div className="flex items-center space-x-2 text-xs text-emerald-700 bg-emerald-50 p-2.5 rounded-xl border border-emerald-200 font-semibold truncate">
+                    <CheckCircle2 className="w-4 h-4 flex-shrink-0 text-emerald-600" />
+                    <span className="truncate">
+                      {videoUrl.includes('/uploads/videos/')
+                        ? `វីដេអូបានរក្សាទុកក្នុង Server: ${videoUrl}`
+                        : `វីដេអូត្រូវបានស្វែងរកឃើញ: ${videoUrl}`}
+                    </span>
+                  </div>
+
+                  {/* LIVE VIDEO PLAYER PREVIEW */}
+                  <div className="p-3 bg-slate-900 rounded-2xl border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1.5">
+                        <Film className="w-3.5 h-3.5 text-brand-red" />
+                        ការមើលវីដេអូសាកល្បង (Live Video Player)
+                      </span>
+                      <span className="text-[10px] text-emerald-400 font-mono bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                        {videoUrl.includes('/uploads/videos/') ? 'Local Server MP4' : 'Direct Video Stream'}
+                      </span>
+                    </div>
+                    <div className="relative aspect-video rounded-xl overflow-hidden bg-black flex items-center justify-center border border-slate-800">
+                      <video
+                        key={videoUrl}
+                        src={videoUrl.startsWith('http') && !videoUrl.includes('localhost') && !videoUrl.includes('us.apsara.lol') ? `/api/proxy/video?url=${encodeURIComponent(videoUrl)}` : (videoUrl.includes('/uploads/') ? `http://us.apsara.lol:15511${videoUrl.substring(videoUrl.indexOf('/uploads/'))}` : videoUrl)}
+                        controls
+                        playsInline
+                        preload="metadata"
+                        poster={posterUrl || undefined}
+                        className="w-full h-full object-contain"
+                        onError={(e) => {
+                          const target = e.currentTarget;
+                          if (!target.src.includes('/api/proxy/video') && videoUrl.startsWith('http')) {
+                            target.src = `/api/proxy/video?url=${encodeURIComponent(videoUrl)}`;
+                            target.load();
+                          }
+                        }}
+                      />
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

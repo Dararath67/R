@@ -76,6 +76,7 @@ export const CustomVideoPlayer: React.FC<CustomVideoPlayerProps> = ({
   const [showControls, setShowControls] = useState(true);
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [videoError, setVideoError] = useState(false);
+  const [retriedWithProxy, setRetriedWithProxy] = useState(false);
   const [activeSrc, setActiveSrc] = useState<string>(() => getFormattedVideoUrl(src));
   const [doubleTapOverlay, setDoubleTapOverlay] = useState<{ type: 'rewind' | 'forward'; id: number } | null>(null);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -122,6 +123,7 @@ export const CustomVideoPlayer: React.FC<CustomVideoPlayerProps> = ({
   useEffect(() => {
     const formatted = getFormattedVideoUrl(src);
     setActiveSrc(formatted);
+    setRetriedWithProxy(false);
     setVideoError(false);
     if (videoRef.current && !youtubeEmbedUrl) {
       videoRef.current.src = formatted;
@@ -231,6 +233,19 @@ export const CustomVideoPlayer: React.FC<CustomVideoPlayerProps> = ({
 
   const handleVideoError = () => {
     console.warn('Video failed to load source:', activeSrc);
+    // If it's an external URL and hasn't been proxied yet, try proxying via backend
+    if (!retriedWithProxy && activeSrc && (activeSrc.startsWith('http://') || activeSrc.startsWith('https://')) && !activeSrc.includes('/api/proxy/video')) {
+      console.info('Switching to backend video streaming proxy for:', activeSrc);
+      setRetriedWithProxy(true);
+      const proxyUrl = `/api/proxy/video?url=${encodeURIComponent(activeSrc)}`;
+      setActiveSrc(proxyUrl);
+      if (videoRef.current) {
+        videoRef.current.src = proxyUrl;
+        videoRef.current.load();
+        videoRef.current.play().catch(() => {});
+      }
+      return;
+    }
     setVideoError(true);
   };
 

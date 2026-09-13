@@ -341,6 +341,26 @@ export default function AdminEpisodesPage() {
                       className="w-full bg-white border border-slate-200 text-slate-900 rounded-xl p-2 font-mono text-xs"
                     />
                   </div>
+
+                  {videoUrl && (
+                    <div className="relative aspect-video rounded-xl overflow-hidden bg-black flex items-center justify-center border border-slate-300">
+                      <video
+                        key={videoUrl}
+                        src={videoUrl.startsWith('http') && !videoUrl.includes('localhost') && !videoUrl.includes('us.apsara.lol') ? `/api/proxy/video?url=${encodeURIComponent(videoUrl)}` : (videoUrl.includes('/uploads/') ? `http://us.apsara.lol:15511${videoUrl.substring(videoUrl.indexOf('/uploads/'))}` : videoUrl)}
+                        controls
+                        playsInline
+                        preload="metadata"
+                        className="w-full h-full object-contain"
+                        onError={(e) => {
+                          const target = e.currentTarget;
+                          if (!target.src.includes('/api/proxy/video') && videoUrl.startsWith('http')) {
+                            target.src = `/api/proxy/video?url=${encodeURIComponent(videoUrl)}`;
+                            target.load();
+                          }
+                        }}
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex justify-end space-x-2 pt-2">
