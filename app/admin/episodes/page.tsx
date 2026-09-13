@@ -37,7 +37,7 @@ export default function AdminEpisodesPage() {
   const [autoCaption, setAutoCaption] = useState(true);
 
   const handleApplyAutoCaption = async (targetUrlOrName: string) => {
-    if (!autoCaption || !targetUrlOrName) return;
+    if (!targetUrlOrName) return;
     try {
       const meta = await api.extractVideoCaption({
         url: targetUrlOrName,
@@ -47,7 +47,7 @@ export default function AdminEpisodesPage() {
         if (meta.videoUrl && meta.videoUrl.startsWith('http')) {
           setVideoUrl(meta.videoUrl);
         }
-        if (meta.title && (!title || title.startsWith('tlg_') || title.startsWith('web_') || title.startsWith('dl_') || title.includes('blog-post'))) {
+        if (meta.title) {
           setTitle(meta.title);
         }
       }
@@ -330,16 +330,33 @@ export default function AdminEpisodesPage() {
                     <input
                       type="text"
                       required
-                      placeholder="បញ្ជូលតំណភ្ជាប់វីដេអូ ឬ /uploads/videos/..."
+                      placeholder="បញ្ជូលតំណភ្ជាប់វីដេអូ ឬ Link គេហទំព័រ..."
                       value={videoUrl}
+                      onPaste={(e) => {
+                        const pasted = e.clipboardData.getData('text');
+                        if (pasted && pasted.trim().startsWith('http')) {
+                          setVideoUrl(pasted.trim());
+                          setTimeout(() => handleApplyAutoCaption(pasted.trim()), 100);
+                        }
+                      }}
                       onChange={(e) => {
                         setVideoUrl(e.target.value);
-                        if (autoCaption && e.target.value.length > 5) {
+                        if (e.target.value.length > 8 && e.target.value.startsWith('http')) {
                           handleApplyAutoCaption(e.target.value);
                         }
                       }}
                       className="w-full bg-white border border-slate-200 text-slate-900 rounded-xl p-2 font-mono text-xs"
                     />
+                    <button
+                      type="button"
+                      onClick={() => handleApplyAutoCaption(videoUrl.trim())}
+                      disabled={!videoUrl.trim()}
+                      className="px-2.5 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl text-xs flex items-center space-x-1 shrink-0 shadow-sm disabled:opacity-50 cursor-pointer"
+                      title="ស្វែងរកវីដេអូស្វ័យប្រវត្តិ"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>ស្រង់</span>
+                    </button>
                   </div>
 
                   {videoUrl && (

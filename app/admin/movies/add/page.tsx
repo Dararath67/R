@@ -51,8 +51,9 @@ export default function AddMoviePage() {
   const [tgVideoHistory, setTgVideoHistory] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
+  const autoExtractTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+
   const handleApplyAutoCaption = async (targetUrlOrName: string, directCaption?: string) => {
-    if (!autoCaption) return;
     if (!targetUrlOrName && !directCaption) return;
     try {
       setExtractingCaption(true);
@@ -65,15 +66,15 @@ export default function AddMoviePage() {
         if (meta.videoUrl && meta.videoUrl.startsWith('http')) {
           setVideoUrl(meta.videoUrl);
         }
-        if (meta.posterUrl && (!posterUrl || posterUrl.includes('unsplash'))) {
+        if (meta.posterUrl) {
           setPosterUrl(meta.posterUrl);
-          setBackdropUrl((prev) => prev || meta.posterUrl);
+          setBackdropUrl(meta.posterUrl);
         }
-        if (meta.title && (!title || title === 'ភាពយន្តថ្មី' || title.startsWith('tlg_') || title.startsWith('web_') || title.startsWith('dl_') || title.includes('blog-post'))) {
+        if (meta.title) {
           setTitle(meta.title);
           setTitleError(false);
         }
-        if (meta.description && (!description || description.includes('សង្ខេប') || description.length < 10)) {
+        if (meta.description) {
           setDescription(meta.description);
         }
         if (meta.releaseYear && meta.releaseYear > 1900) {
@@ -528,17 +529,37 @@ export default function AddMoviePage() {
                 <div className="flex items-center space-x-2 w-full">
                   <input
                     type="text"
-                    placeholder="បញ្ជូលតំណភ្ជាប់វីដេអូ URL ខាងក្រៅ..."
+                    placeholder="បញ្ជូលតំណភ្ជាប់វីដេអូ URL ឬ Link គេហទំព័រ..."
                     value={videoUrl}
+                    onPaste={(e) => {
+                      const pasted = e.clipboardData.getData('text');
+                      if (pasted && pasted.trim().startsWith('http')) {
+                        setVideoUrl(pasted.trim());
+                        setTimeout(() => handleApplyAutoCaption(pasted.trim()), 100);
+                      }
+                    }}
                     onChange={(e) => {
                       const val = e.target.value;
                       setVideoUrl(val);
-                      if (autoCaption && val.trim().length > 5) {
-                        handleApplyAutoCaption(val.trim());
+                      if (autoExtractTimerRef.current) clearTimeout(autoExtractTimerRef.current);
+                      if (val.trim().length > 8 && val.trim().startsWith('http')) {
+                        autoExtractTimerRef.current = setTimeout(() => {
+                          handleApplyAutoCaption(val.trim());
+                        }, 500);
                       }
                     }}
                     className="flex-grow bg-white border border-slate-200 text-slate-900 rounded-xl p-2.5 text-xs font-mono"
                   />
+                  <button
+                    type="button"
+                    onClick={() => handleApplyAutoCaption(videoUrl.trim())}
+                    disabled={extractingCaption || !videoUrl.trim()}
+                    className="px-3 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl text-xs flex items-center space-x-1.5 shrink-0 shadow-sm transition-all disabled:opacity-50 cursor-pointer"
+                    title="ស្វែងរកវីដេអូ ចំណងជើង និង Poster ពី Link នេះដោយស្វ័យប្រវត្តិ"
+                  >
+                    {extractingCaption ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                    <span>{extractingCaption ? 'កំពុងស្រង់...' : 'ស្វែងរកវីដេអូ & Caption'}</span>
+                  </button>
                   {videoUrl && !videoUrl.includes('/uploads/videos/') && (
                     <button
                       type="button"
@@ -548,7 +569,7 @@ export default function AddMoviePage() {
                       title="ទាញយក និងរក្សាទុកវីដេអូក្នុង Server ស្វ័យប្រវត្តិ"
                     >
                       {downloadingUrl ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                      <span>{downloadingUrl ? 'កំពុងទាញយក...' : 'ទាញយក & រក្សាទុកក្នុង Server'}</span>
+                      <span>{downloadingUrl ? 'កំពុងទាញយក...' : 'ទាញយកក្នុង Server'}</span>
                     </button>
                   )}
                 </div>
