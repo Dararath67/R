@@ -39,6 +39,7 @@ export default function EditMoviePage() {
   const [uploadingPoster, setUploadingPoster] = useState(false);
   const [uploadingBackdrop, setUploadingBackdrop] = useState(false);
   const [downloadingUrl, setDownloadingUrl] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Alert Modal State
   const [alertModal, setAlertModal] = useState<{
@@ -53,6 +54,54 @@ export default function EditMoviePage() {
 
   const showAlert = (title: string, message: string) => {
     setAlertModal({ isOpen: true, title, message });
+  };
+
+  const autoCapturePosterFromVideo = async (targetUrl: string) => {
+    if (!targetUrl || !targetUrl.trim()) return;
+    try {
+      setUploadingPoster(true);
+      const video = document.createElement('video');
+      video.crossOrigin = 'anonymous';
+      const formattedUrl = targetUrl.includes('/uploads/')
+        ? `http://us.apsara.lol:15511${targetUrl.substring(targetUrl.indexOf('/uploads/'))}`
+        : targetUrl;
+      video.src = formattedUrl;
+      video.currentTime = 1;
+
+      await new Promise((resolve) => {
+        const timeout = setTimeout(() => resolve(null), 3000);
+        video.onloadeddata = () => { video.currentTime = 1; };
+        video.onseeked = () => { clearTimeout(timeout); resolve(null); };
+        video.onerror = () => { clearTimeout(timeout); resolve(null); };
+      });
+
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth || 1280;
+      canvas.height = video.videoHeight || 720;
+      const ctx = canvas.getContext('2d');
+      if (ctx && video.videoWidth > 0) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob(async (blob) => {
+          if (blob) {
+            const file = new File([blob], `frame_${Date.now()}.jpg`, { type: 'image/jpeg' });
+            try {
+              const res = await api.uploadImage(file);
+              if (res && res.url) {
+                setPosterUrl(res.url);
+                setBackdropUrl((prev) => prev || res.url);
+              }
+            } catch {}
+          }
+          setUploadingPoster(false);
+        }, 'image/jpeg', 0.9);
+      } else {
+        setUploadingPoster(false);
+      }
+    } catch (err) {
+      setUploadingPoster(false);
+    } finally {
+      setUploadingPoster(false);
+    }
   };
 
   const handleDownloadVideoUrl = async () => {
@@ -70,7 +119,13 @@ export default function EditMoviePage() {
       const res = await api.downloadVideoFromUrl(videoUrl.trim());
       if (res.url) {
         setVideoUrl(res.url);
-        showAlert('ជោគជ័យ', 'បានទាញយក និងរក្សាទុកវីដេអូក្នុង Server ដោយជោគជ័យ!');
+        if (res.posterUrl) {
+          setPosterUrl(res.posterUrl);
+          setBackdropUrl((prev) => prev || res.posterUrl);
+        } else {
+          autoCapturePosterFromVideo(res.url);
+        }
+        showAlert('ជោគជ័យ', 'បានទាញយក និងកាត់រូបភាព Poster តាមវីដេអូដោយជោគជ័យ!');
       }
     } catch (err: any) {
       showAlert('បរាជ័យ', err.message || 'បរាជ័យក្នុងការទាញយកវីដេអូពី Link');
@@ -115,6 +170,16 @@ export default function EditMoviePage() {
       setUploadingVideo(true);
       const res = await api.uploadVideo(file);
       setVideoUrl(res.url);
+      if (res.posterUrl) {
+        setPosterUrl(res.posterUrl);
+        if (!backdropUrl) setBackdropUrl(res.posterUrl);
+      } else {
+        autoCapturePosterFromVideo(res.url);
+      }
+      if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+      showAlert('ជោគជ័យ', 'បានផ្ទុកឡើងវីដេអូ និងទាញយករូបភាព Poster ដោយជោគជ័យ!');
     } catch (err) {
       showAlert('បរាជ័យ', 'បរាជ័យក្នុងការផ្ទុកឡើងឯកសារវីដេអូ');
     } finally {
@@ -150,28 +215,43 @@ export default function EditMoviePage() {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    await updateMovie(item.id, {
-      title,
-      description,
-      releaseYear,
-      rating,
-      duration,
-      posterUrl,
-      backdropUrl,
-      videoUrl,
-      trailerUrl,
-      genres: selectedGenres,
-      director,
-      isPublished,
-      isFeatured,
-      isTrending,
-      isPopular,
-      isLatest,
-    });
+  const handleSaveAndPost = async (e?: React.MouseEvent) => {
+    if (e) e.preventDefault();
+    if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    if (!title || !title.trim()) {
+      showAlert('ខ្វះព័ត៌មាន', 'សូមបញ្ចូលចំណងជើងភាពយន្ត!');
+      return;
+    }
 
-    router.push('/admin/movies');
+    try {
+      setIsSubmitting(true);
+      await updateMovie(item.id, {
+        title: title.trim(),
+        description,
+        releaseYear,
+        rating,
+        duration,
+        posterUrl,
+        backdropUrl,
+        videoUrl: videoUrl.trim(),
+        trailerUrl,
+        genres: selectedGenres,
+        director,
+        isPublished,
+        isFeatured,
+        isTrending,
+        isPopular,
+        isLatest,
+      });
+
+      window.location.href = '/admin/movies';
+    } catch (err: any) {
+      console.error('Update movie error:', err);
+      showAlert('បរាជ័យ', err?.message || 'បរាជ័យក្នុងការកែប្រែភាពយន្ត');
+      setIsSubmitting(false);
+    }
   };
 
   const toggleGenre = (gName: string) => {
@@ -200,7 +280,7 @@ export default function EditMoviePage() {
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 space-y-6 shadow-sm">
+        <form onSubmit={(e) => { e.preventDefault(); handleSaveAndPost(); }} className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 space-y-6 shadow-sm">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs">
             {/* Movie Title */}
             <div className="md:col-span-2 space-y-1.5">
@@ -255,8 +335,8 @@ export default function EditMoviePage() {
                 <span className="text-slate-400 font-bold">ឬ</span>
                 <div className="flex items-center space-x-2 w-full">
                   <input
-                    type="url"
-                    placeholder="បញ្ជូលតំណភ្ជាប់វីដេអូ URL ខាងក្រៅ..."
+                    type="text"
+                    placeholder="បញ្ជូលតំណភ្ជាប់វីដេអូ URL ឬ /uploads/videos/..."
                     value={videoUrl}
                     onChange={(e) => setVideoUrl(e.target.value)}
                     className="flex-grow bg-white border border-slate-200 text-slate-900 rounded-xl p-2.5 text-xs font-mono"
@@ -308,10 +388,10 @@ export default function EditMoviePage() {
                 {uploadingPoster && <span className="text-[10px] text-brand-red animate-pulse">កំពុងផ្ទុកឡើង...</span>}
               </div>
               <input
-                type="url"
+                type="text"
                 value={posterUrl}
                 onChange={(e) => setPosterUrl(e.target.value)}
-                placeholder="តំណភ្ជាប់ Poster URL..."
+                placeholder="តំណភ្ជាប់ Poster URL ឬ /uploads/images/..."
                 className="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-xl p-2.5 text-xs"
               />
             </div>
@@ -336,10 +416,10 @@ export default function EditMoviePage() {
                 {uploadingBackdrop && <span className="text-[10px] text-brand-red animate-pulse">កំពុងផ្ទុកឡើង...</span>}
               </div>
               <input
-                type="url"
+                type="text"
                 value={backdropUrl}
                 onChange={(e) => setBackdropUrl(e.target.value)}
-                placeholder="តំណភ្ជាប់ Backdrop URL..."
+                placeholder="តំណភ្ជាប់ Backdrop URL ឬ /uploads/images/..."
                 className="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-xl p-2.5 text-xs"
               />
             </div>
@@ -593,12 +673,22 @@ export default function EditMoviePage() {
 
           <div className="pt-6 border-t border-slate-200 flex justify-end">
             <button
-              type="submit"
-              disabled={uploadingVideo || uploadingPoster}
-              className="px-8 py-3 bg-brand-red hover:bg-brand-crimson text-white font-bold rounded-2xl shadow-md shadow-brand-red/20 flex items-center space-x-2 text-sm disabled:opacity-50 transition-all duration-75 active:duration-0 transform active:scale-95"
+              type="button"
+              onClick={handleSaveAndPost}
+              disabled={isSubmitting || uploadingVideo || uploadingPoster}
+              className="px-8 py-3 bg-brand-red hover:bg-brand-crimson text-white font-bold rounded-2xl shadow-md shadow-brand-red/20 flex items-center space-x-2 text-sm disabled:opacity-50 transition-all duration-75 active:duration-0 transform active:scale-95 cursor-pointer"
             >
-              <Save className="w-4 h-4" />
-              <span>រក្សាទុកការកែប្រែភាពយន្ត</span>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>កំពុងរក្សាទុក...</span>
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4" />
+                  <span>រក្សាទុកការកែប្រែភាពយន្ត</span>
+                </>
+              )}
             </button>
           </div>
         </form>

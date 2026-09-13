@@ -40,8 +40,8 @@ export default function AdminSeriesPage() {
       description,
       posterUrl,
       backdropUrl: posterUrl,
-      trailerUrl: SAMPLE_VIDEOS.tearsOfSteel,
-      videoUrl: SAMPLE_VIDEOS.tearsOfSteel,
+      trailerUrl: '',
+      videoUrl: '',
       releaseYear,
       rating,
       duration: '1 Season',
@@ -167,9 +167,10 @@ export default function AdminSeriesPage() {
                 <div>
                   <label className="block text-slate-700 mb-1 font-bold">Poster Image URL</label>
                   <input
-                    type="url"
+                    type="text"
                     value={posterUrl}
                     onChange={(e) => setPosterUrl(e.target.value)}
+                    placeholder="តំណភ្ជាប់ Poster URL ឬ /uploads/images/..."
                     className="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-xl p-2.5"
                   />
                 </div>

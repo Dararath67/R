@@ -129,6 +129,10 @@ export const api = {
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
       body: JSON.stringify(movieData),
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'បរាជ័យក្នុងការបន្ថែមភាពយន្ត');
+    }
     return await res.json();
   },
 
@@ -138,6 +142,10 @@ export const api = {
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
       body: JSON.stringify(movieData),
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'បរាជ័យក្នុងការកែប្រែភាពយន្ត');
+    }
     return await res.json();
   },
 

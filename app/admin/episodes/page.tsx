@@ -30,7 +30,7 @@ export default function AdminEpisodesPage() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [duration, setDuration] = useState('45m');
-  const [videoUrl, setVideoUrl] = useState(SAMPLE_VIDEOS.tearsOfSteel);
+  const [videoUrl, setVideoUrl] = useState('');
 
   const handleAddEpisode = (e: React.FormEvent) => {
     e.preventDefault();
@@ -236,10 +236,11 @@ export default function AdminEpisodesPage() {
                 </div>
 
                 <div>
-                  <label className="block text-slate-700 mb-1 font-bold">Video Stream URL *</label>
+                  <label className="block text-slate-700 mb-1 font-bold">Video Stream URL ឬ Upload Path *</label>
                   <input
-                    type="url"
+                    type="text"
                     required
+                    placeholder="បញ្ជូលតំណភ្ជាប់វីដេអូ ឬ /uploads/videos/..."
                     value={videoUrl}
                     onChange={(e) => setVideoUrl(e.target.value)}
                     className="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-xl p-2.5 font-mono"

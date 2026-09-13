@@ -15,16 +15,16 @@ export default function AddMoviePage() {
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [releaseYear, setReleaseYear] = useState<number>(2026);
+  const [releaseYear, setReleaseYear] = useState<number>(new Date().getFullYear());
   const [rating, setRating] = useState<number>(8.5);
-  const [duration, setDuration] = useState('2h 15m');
+  const [duration, setDuration] = useState('');
   const [posterUrl, setPosterUrl] = useState('');
   const [backdropUrl, setBackdropUrl] = useState('');
-  const [videoUrl, setVideoUrl] = useState(SAMPLE_VIDEOS.tearsOfSteel);
-  const [trailerUrl, setTrailerUrl] = useState(SAMPLE_VIDEOS.sintel);
-  const [selectedGenres, setSelectedGenres] = useState<string[]>(['Action', 'Sci-Fi']);
-  const [cast, setCast] = useState('John Doe, Sarah Connor');
-  const [director, setDirector] = useState('Alex Voss');
+  const [videoUrl, setVideoUrl] = useState('');
+  const [trailerUrl, setTrailerUrl] = useState('');
+  const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
+  const [cast, setCast] = useState('');
+  const [director, setDirector] = useState('');
   const [isPublished, setIsPublished] = useState(true);
   const [isFeatured, setIsFeatured] = useState(false);
   const [isTrending, setIsTrending] = useState(true);
@@ -36,6 +36,8 @@ export default function AddMoviePage() {
   const [uploadingPoster, setUploadingPoster] = useState(false);
   const [uploadingBackdrop, setUploadingBackdrop] = useState(false);
   const [downloadingUrl, setDownloadingUrl] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [titleError, setTitleError] = useState(false);
 
   // Telegram Bot Auto-Fill State
   const [lastTgTimestamp, setLastTgTimestamp] = useState<number>(Date.now());
@@ -56,12 +58,66 @@ export default function AddMoviePage() {
     }
   };
 
+  const autoCapturePosterFromVideo = async (targetUrl: string) => {
+    if (!targetUrl || !targetUrl.trim()) return;
+    try {
+      setUploadingPoster(true);
+      const video = document.createElement('video');
+      video.crossOrigin = 'anonymous';
+      const formattedUrl = targetUrl.includes('/uploads/')
+        ? `http://us.apsara.lol:15511${targetUrl.substring(targetUrl.indexOf('/uploads/'))}`
+        : targetUrl;
+      video.src = formattedUrl;
+      video.currentTime = 1;
+
+      await new Promise((resolve) => {
+        const timeout = setTimeout(() => resolve(null), 3000);
+        video.onloadeddata = () => { video.currentTime = 1; };
+        video.onseeked = () => { clearTimeout(timeout); resolve(null); };
+        video.onerror = () => { clearTimeout(timeout); resolve(null); };
+      });
+
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth || 1280;
+      canvas.height = video.videoHeight || 720;
+      const ctx = canvas.getContext('2d');
+      if (ctx && video.videoWidth > 0) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob(async (blob) => {
+          if (blob) {
+            const file = new File([blob], `frame_${Date.now()}.jpg`, { type: 'image/jpeg' });
+            try {
+              const res = await api.uploadImage(file);
+              if (res && res.url) {
+                setPosterUrl(res.url);
+                setBackdropUrl((prev) => prev || res.url);
+              }
+            } catch {}
+          }
+          setUploadingPoster(false);
+        }, 'image/jpeg', 0.9);
+      } else {
+        setUploadingPoster(false);
+      }
+    } catch (err) {
+      setUploadingPoster(false);
+    } finally {
+      setUploadingPoster(false);
+    }
+  };
+
   React.useEffect(() => {
     const interval = setInterval(async () => {
       try {
         const latest = await api.getLatestTelegramUpload();
         if (latest && latest.timestamp > lastTgTimestamp && latest.url) {
           setVideoUrl(latest.url);
+          if (latest.posterUrl) {
+            setPosterUrl(latest.posterUrl);
+            setBackdropUrl((prev) => prev || latest.posterUrl);
+          } else {
+            autoCapturePosterFromVideo(latest.url);
+          }
           setLastTgTimestamp(latest.timestamp);
           setTgAutoNotice(`បានទទួលវីដេអូថ្មីពី Telegram Bot: ${latest.filename || 'វីដេអូថ្មី'}`);
           setTimeout(() => setTgAutoNotice(''), 7000);
@@ -101,7 +157,13 @@ export default function AddMoviePage() {
       const res = await api.downloadVideoFromUrl(videoUrl.trim());
       if (res.url) {
         setVideoUrl(res.url);
-        showAlert('ជោគជ័យ', 'បានទាញយក និងរក្សាទុកវីដេអូក្នុង Server ដោយជោគជ័យ!');
+        if (res.posterUrl) {
+          setPosterUrl(res.posterUrl);
+          setBackdropUrl((prev) => prev || res.posterUrl);
+        } else {
+          autoCapturePosterFromVideo(res.url);
+        }
+        showAlert('ជោគជ័យ', 'បានទាញយក និងកាត់រូបភាព Poster តាមវីដេអូដោយជោគជ័យ!');
       }
     } catch (err: any) {
       showAlert('បរាជ័យ', err.message || 'បរាជ័យក្នុងការទាញយកវីដេអូពី Link');
@@ -117,11 +179,30 @@ export default function AddMoviePage() {
       setUploadingVideo(true);
       const res = await api.uploadVideo(file);
       setVideoUrl(res.url);
+      if (res.posterUrl) {
+        setPosterUrl(res.posterUrl);
+        if (!backdropUrl) setBackdropUrl(res.posterUrl);
+      } else {
+        autoCapturePosterFromVideo(res.url);
+      }
+      if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+      showAlert('ជោគជ័យ', 'បានផ្ទុកឡើងវីដេអូ និងទាញយករូបភាព Poster ដោយជោគជ័យ!');
     } catch (err) {
       showAlert('បរាជ័យ', 'បរាជ័យក្នុងការផ្ទុកឡើងឯកសារវីដេអូ');
     } finally {
       setUploadingVideo(false);
     }
+  };
+
+  const handleAutoCaptureFrame = async () => {
+    if (!videoUrl) {
+      showAlert('ខ្វះព័ត៌មាន', 'សូមបញ្ចូល ឬ ផ្ទុកឡើង Video URL ជាមុនសិន!');
+      return;
+    }
+    await autoCapturePosterFromVideo(videoUrl);
+    showAlert('ជោគជ័យ', 'បានកាត់រូបភាព Poster តាមវីដេអូដោយជោគជ័យ!');
   };
 
   const handlePosterFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -152,39 +233,54 @@ export default function AddMoviePage() {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title || !videoUrl) {
-      showAlert('ខ្វះព័ត៌មាន', 'សូមបំពេញព័ត៌មានចាំបាច់ (ចំណងជើងភាពយន្ត និង ឯកសារវីដេអូ)');
+  const handleSaveAndPost = async (e?: React.MouseEvent) => {
+    if (e) e.preventDefault();
+    if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    if (!title || !title.trim()) {
+      setTitleError(true);
+      showAlert('ខ្វះចំណងជើងភាពយន្ត', 'សូមបញ្ចូល «ចំណងជើងភាពយន្ត *» នៅផ្នែកខាងលើជាមុនសិន!');
+      return;
+    }
+    if (!videoUrl || !videoUrl.trim()) {
+      showAlert('ខ្វះព័ត៌មាន', 'សូមបញ្ចូល ឬ ផ្ទុកឡើងឯកសារវីដេអូ!');
       return;
     }
 
-    await addMovie({
-      title,
-      description,
-      posterUrl: posterUrl || 'https://images.unsplash.com/photo-1534447677768-be436bb09401?w=600&auto=format&fit=crop&q=80',
-      backdropUrl: backdropUrl || posterUrl || 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=1600&auto=format&fit=crop&q=80',
-      trailerUrl,
-      videoUrl,
-      releaseYear,
-      rating,
-      duration,
-      type: 'movie',
-      genres: selectedGenres,
-      cast: cast.split(',').map((c) => c.trim()),
-      director,
-      isPublished,
-      isFeatured,
-      isTrending,
-      isPopular,
-      isLatest,
-      subtitles: [
-        { id: 's1', label: 'English', lang: 'en', src: '' },
-        { id: 's2', label: 'Khmer', lang: 'km', src: '' },
-      ],
-    });
+    try {
+      setIsSubmitting(true);
+      await addMovie({
+        title: title.trim(),
+        description: description.trim(),
+        posterUrl: posterUrl.trim(),
+        backdropUrl: backdropUrl.trim() || posterUrl.trim(),
+        trailerUrl: trailerUrl.trim(),
+        videoUrl: videoUrl.trim(),
+        releaseYear,
+        rating,
+        duration: duration.trim() || '1h 30m',
+        type: 'movie',
+        genres: selectedGenres.length > 0 ? selectedGenres : ['General'],
+        cast: cast.trim() ? cast.split(',').map((c) => c.trim()).filter(Boolean) : [],
+        director: director.trim(),
+        isPublished,
+        isFeatured,
+        isTrending,
+        isPopular,
+        isLatest,
+        subtitles: [
+          { id: 's1', label: 'English', lang: 'en', src: '' },
+          { id: 's2', label: 'Khmer', lang: 'km', src: '' },
+        ],
+      });
 
-    router.push('/admin/movies');
+      window.location.href = '/admin/movies';
+    } catch (err: any) {
+      console.error('Add movie error:', err);
+      showAlert('បរាជ័យ', err?.message || 'បរាជ័យក្នុងការរក្សាទុកភាពយន្ត');
+      setIsSubmitting(false);
+    }
   };
 
   const toggleGenre = (genreName: string) => {
@@ -213,20 +309,23 @@ export default function AddMoviePage() {
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 space-y-6 shadow-sm">
+        <form onSubmit={(e) => { e.preventDefault(); handleSaveAndPost(); }} className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 space-y-6 shadow-sm">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs">
             {/* Title */}
-            <div className="md:col-span-2 space-y-1.5">
-              <label className="block font-bold text-slate-700 uppercase tracking-wider">
-                ចំណងជើងភាពយន្ត *
+            <div className="md:col-span-2 space-y-1.5" id="title-field">
+              <label className="block font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between">
+                <span>ចំណងជើងភាពយន្ត *</span>
+                {titleError && <span className="text-brand-red text-xs normal-case font-bold animate-pulse">សូមបញ្ចូលចំណងជើងភាពយន្ត!</span>}
               </label>
               <input
+                id="movie-title-input"
                 type="text"
-                required
                 placeholder="ឧ. ភាពយន្ត..."
                 value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-xl p-3 text-sm focus:border-brand-red focus:bg-white focus:outline-none"
+                onChange={(e) => { setTitle(e.target.value); setTitleError(false); }}
+                className={`w-full bg-slate-50 border rounded-xl p-3 text-sm focus:outline-none transition-all ${
+                  titleError ? 'border-brand-red ring-2 ring-brand-red/30 bg-red-50/20' : 'border-slate-200 text-slate-900 focus:border-brand-red focus:bg-white'
+                }`}
               />
             </div>
 
@@ -303,7 +402,7 @@ export default function AddMoviePage() {
                 <span className="text-slate-400 font-bold">ឬ</span>
                 <div className="flex items-center space-x-2 w-full">
                   <input
-                    type="url"
+                    type="text"
                     placeholder="បញ្ជូលតំណភ្ជាប់វីដេអូ URL ខាងក្រៅ..."
                     value={videoUrl}
                     onChange={(e) => setVideoUrl(e.target.value)}
@@ -353,10 +452,18 @@ export default function AddMoviePage() {
                     className="hidden"
                   />
                 </label>
+                <button
+                  type="button"
+                  onClick={handleAutoCaptureFrame}
+                  className="bg-amber-500 hover:bg-amber-600 text-white font-bold px-3 py-2 rounded-xl text-xs flex items-center space-x-1.5 transition-all shadow-sm"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>កាត់រូបតាមវីដេអូ</span>
+                </button>
                 {uploadingPoster && <span className="text-[10px] text-brand-red animate-pulse">កំពុងផ្ទុកឡើង...</span>}
               </div>
               <input
-                type="url"
+                type="text"
                 placeholder="តំណភ្ជាប់ Poster URL..."
                 value={posterUrl}
                 onChange={(e) => setPosterUrl(e.target.value)}
@@ -384,7 +491,7 @@ export default function AddMoviePage() {
                 {uploadingBackdrop && <span className="text-[10px] text-brand-red animate-pulse">កំពុងផ្ទុកឡើង...</span>}
               </div>
               <input
-                type="url"
+                type="text"
                 placeholder="តំណភ្ជាប់ Backdrop URL..."
                 value={backdropUrl}
                 onChange={(e) => setBackdropUrl(e.target.value)}
@@ -641,12 +748,22 @@ export default function AddMoviePage() {
 
           <div className="pt-6 border-t border-slate-200 flex justify-end">
             <button
-              type="submit"
-              disabled={uploadingVideo || uploadingPoster}
-              className="px-8 py-3 bg-brand-red hover:bg-brand-crimson text-white font-bold rounded-2xl shadow-md shadow-brand-red/20 flex items-center space-x-2 text-sm disabled:opacity-50 transition-all duration-75 active:duration-0 transform active:scale-95"
+              type="button"
+              onClick={handleSaveAndPost}
+              disabled={isSubmitting || uploadingVideo || uploadingPoster}
+              className="px-8 py-3 bg-brand-red hover:bg-brand-crimson text-white font-bold rounded-2xl shadow-md shadow-brand-red/20 flex items-center space-x-2 text-sm disabled:opacity-50 transition-all duration-75 active:duration-0 transform active:scale-95 cursor-pointer"
             >
-              <Save className="w-4 h-4" />
-              <span>រក្សាទុក និងបោះពុម្ពផ្សាយភាពយន្ត</span>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>កំពុងរក្សាទុក...</span>
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4" />
+                  <span>រក្សាទុក និងបោះពុម្ពផ្សាយភាពយន្ត</span>
+                </>
+              )}
             </button>
           </div>
         </form>
@@ -717,6 +834,12 @@ export default function AddMoviePage() {
                       type="button"
                       onClick={() => {
                         setVideoUrl(item.url);
+                        if (item.posterUrl) {
+                          setPosterUrl(item.posterUrl);
+                          setBackdropUrl((prev) => prev || item.posterUrl);
+                        } else {
+                          autoCapturePosterFromVideo(item.url);
+                        }
                         setShowTgPickerModal(false);
                       }}
                       className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shrink-0 transition-all cursor-pointer shadow-md"

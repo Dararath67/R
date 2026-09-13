@@ -230,6 +230,25 @@ def init_db():
         )
     ''')
 
+    # Seed default genres if empty
+    try:
+        cursor.execute("SELECT COUNT(*) FROM genres")
+        if cursor.fetchone()[0] == 0:
+            default_genres = [
+                ("g-1", "សកម្មភាព (Action)", "action"),
+                ("g-2", "វិទ្យាសាស្ត្រ (Sci-Fi)", "sci-fi"),
+                ("g-3", "រឿងភាគ (Drama)", "drama"),
+                ("g-4", "ផ្សងព្រេង (Adventure)", "adventure"),
+                ("g-5", "កំប្លែង (Comedy)", "comedy"),
+                ("g-6", "រំភើប (Thriller)", "thriller"),
+                ("g-7", "រន្ធត់ (Horror)", "horror"),
+                ("g-8", "ភាពយន្តខ្មែរ (Khmer Cinema)", "khmer-cinema")
+            ]
+            cursor.executemany("INSERT OR IGNORE INTO genres (id, name, slug) VALUES (?, ?, ?)", default_genres)
+            conn.commit()
+    except Exception as e:
+        print("Genres seed error:", e)
+
     # Users Table with password_hash
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (

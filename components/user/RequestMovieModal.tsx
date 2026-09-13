@@ -144,8 +144,8 @@ export function RequestMovieModal({ isOpen, onClose }: RequestMovieModalProps) {
                 </label>
                 <div className="relative">
                   <input
-                    type="url"
-                    placeholder="https://... (ដាក់ក៏បាន មិនដាក់ក៏បាន)"
+                    type="text"
+                    placeholder="https://... ឬ តំណភ្ជាប់ (ដាក់ក៏បាន មិនដាក់ក៏បាន)"
                     value={movieLink}
                     onChange={(e) => setMovieLink(e.target.value)}
                     className="w-full bg-slate-950 text-slate-100 text-xs pl-10 pr-4 py-3 rounded-2xl border border-slate-800 focus:outline-none focus:border-brand-red font-medium placeholder-slate-600"

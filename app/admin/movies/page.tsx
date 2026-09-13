@@ -91,13 +91,13 @@ export default function AdminMoviesPage() {
 
   // Modal Form State
   const [formData, setFormData] = useState({
-    apiName: 'TMDB / Movie Provider API',
-    apiUrl: 'https://api.themoviedb.org/3/movie/popular',
+    apiName: '',
+    apiUrl: '',
     apiKey: '',
     title: '',
-    posterUrl: 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=500',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-    releaseYear: 2024,
+    posterUrl: '',
+    videoUrl: '',
+    releaseYear: new Date().getFullYear(),
     rating: 8.5,
     status: 'active',
   });

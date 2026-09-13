@@ -32,7 +32,25 @@ interface CustomVideoPlayerProps {
   onTimeUpdate?: (currentTime: number, duration: number) => void;
 }
 
-const DEFAULT_FALLBACK_VIDEO: string = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
+// Check if URL is YouTube
+export const getYouTubeEmbedUrl = (url: string) => {
+  if (!url) return '';
+  if (url.includes('youtube.com/embed/')) return url;
+  const match = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
+  return match ? `https://www.youtube.com/embed/${match[1]}?autoplay=1&enablejsapi=1` : '';
+};
+
+export const getFormattedVideoUrl = (rawUrl: string): string => {
+  if (!rawUrl) return '';
+  if (rawUrl.includes('/uploads/')) {
+    const uploadPath = rawUrl.substring(rawUrl.indexOf('/uploads/'));
+    if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
+      return uploadPath;
+    }
+    return `http://us.apsara.lol:15511${uploadPath}`;
+  }
+  return rawUrl;
+};
 
 export const CustomVideoPlayer: React.FC<CustomVideoPlayerProps> = ({
   src,
@@ -58,10 +76,13 @@ export const CustomVideoPlayer: React.FC<CustomVideoPlayerProps> = ({
   const [showControls, setShowControls] = useState(true);
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [videoError, setVideoError] = useState(false);
-  const [activeSrc, setActiveSrc] = useState<string>(src || DEFAULT_FALLBACK_VIDEO);
+  const [activeSrc, setActiveSrc] = useState<string>(() => getFormattedVideoUrl(src));
   const [doubleTapOverlay, setDoubleTapOverlay] = useState<{ type: 'rewind' | 'forward'; id: number } | null>(null);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastTapRef = useRef<{ time: number; x: number }>({ time: 0, x: 0 });
+
+  const youtubeEmbedUrl = getYouTubeEmbedUrl(activeSrc);
+  const isYouTube = !!youtubeEmbedUrl;
 
   const handleSpeedChange = (speed: number) => {
     setPlaybackSpeed(speed);
@@ -98,20 +119,14 @@ export const CustomVideoPlayer: React.FC<CustomVideoPlayerProps> = ({
     lastTapRef.current = { time: now, x: clickX };
   };
 
-  // Check if URL is YouTube
-  const getYouTubeEmbedUrl = (url: string) => {
-    if (!url) return '';
-    if (url.includes('youtube.com/embed/')) return url;
-    const match = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
-    return match ? `https://www.youtube.com/embed/${match[1]}?autoplay=1&enablejsapi=1` : '';
-  };
-
-  const youtubeEmbedUrl = getYouTubeEmbedUrl(activeSrc);
-  const isYouTube = !!youtubeEmbedUrl;
-
   useEffect(() => {
-    setActiveSrc(src || DEFAULT_FALLBACK_VIDEO);
+    const formatted = getFormattedVideoUrl(src);
+    setActiveSrc(formatted);
     setVideoError(false);
+    if (videoRef.current && !youtubeEmbedUrl) {
+      videoRef.current.src = formatted;
+      videoRef.current.load();
+    }
   }, [src]);
 
   useEffect(() => {
@@ -210,15 +225,7 @@ export const CustomVideoPlayer: React.FC<CustomVideoPlayerProps> = ({
 
   const handleVideoError = () => {
     console.warn('Video failed to load source:', activeSrc);
-    if (activeSrc !== DEFAULT_FALLBACK_VIDEO) {
-      setActiveSrc(DEFAULT_FALLBACK_VIDEO);
-      setVideoError(false);
-    } else if (activeSrc !== 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4') {
-      setActiveSrc('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4');
-      setVideoError(false);
-    } else {
-      setVideoError(true);
-    }
+    setVideoError(true);
   };
 
   const formatTime = (timeInSec: number) => {
@@ -352,25 +359,28 @@ export const CustomVideoPlayer: React.FC<CustomVideoPlayerProps> = ({
 
           {/* Fallback Error Overlay */}
           {videoError && (
-            <div className="absolute inset-0 bg-slate-950/90 flex flex-col items-center justify-center p-6 text-center space-y-3 z-30">
+            <div className="absolute inset-0 bg-slate-950/90 flex flex-col items-center justify-center p-6 text-center space-y-4 z-30">
               <AlertCircle className="w-12 h-12 text-brand-red animate-bounce" />
-              <p className="text-white font-bold text-sm">មិនអាចលេងវីដេអូដើមបានទេ។ (Video Source Error)</p>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setVideoError(false);
-                  setActiveSrc(DEFAULT_FALLBACK_VIDEO);
-                  if (videoRef.current) {
-                    videoRef.current.src = DEFAULT_FALLBACK_VIDEO;
-                    videoRef.current.load();
-                    videoRef.current.play().catch(() => {});
-                  }
-                }}
-                className="px-5 py-2.5 bg-brand-red hover:bg-red-700 text-white text-xs font-extrabold rounded-xl flex items-center space-x-2 shadow-lg shadow-brand-red/30 transition hover:scale-105"
-              >
-                <RefreshCw className="w-4 h-4" />
-                <span>លេងវីដេអូបម្រុង (Play Fallback Stream)</span>
-              </button>
+              <p className="text-white font-bold text-sm">មិនអាចលេងតំណភ្ជាប់វីដេអូដើមបានទេ។ (Video Source Error)</p>
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setVideoError(false);
+                    const formatted = getFormattedVideoUrl(src);
+                    setActiveSrc(formatted);
+                    if (videoRef.current) {
+                      videoRef.current.src = formatted;
+                      videoRef.current.load();
+                      videoRef.current.play().catch(() => {});
+                    }
+                  }}
+                  className="px-6 py-2.5 bg-brand-red hover:bg-red-700 text-white text-xs font-extrabold rounded-xl flex items-center space-x-2 shadow-lg transition hover:scale-105"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  <span>ព្យាយាមលេងវីដេអូដើមម្ដងទៀត (Retry Video)</span>
+                </button>
+              </div>
             </div>
           )}
 

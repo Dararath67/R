@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, File, UploadFile, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 import sqlite3
 import json
@@ -13,6 +13,13 @@ from urllib.parse import quote
 
 import jwt
 import time
+import logging
+
+class IgnoreInvalidHTTPRequest(logging.Filter):
+    def filter(self, record):
+        return "Invalid HTTP request received" not in record.getMessage()
+
+logging.getLogger("uvicorn.error").addFilter(IgnoreInvalidHTTPRequest())
 from backend.database import (
     init_db, get_db_connection, hash_password, verify_password, is_ip_banned, ban_ip_in_db, unban_ip_in_db,
     record_failed_login_attempt, clear_failed_login_attempts,
@@ -45,8 +52,10 @@ BASE_URL = os.getenv("BASE_URL", "").rstrip("/")
 def get_base_url(request: Request) -> str:
     if BASE_URL:
         return BASE_URL
-    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
     host = request.headers.get("x-forwarded-host", request.url.netloc)
+    if "vercel.app" in host or "localhost" in host:
+        return "http://us.apsara.lol:15511"
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
     return f"{scheme}://{host}"
 
 MIRROR_SERVER_URL = os.getenv("MIRROR_SERVER_URL", "https://r-diut.onrender.com")
@@ -220,9 +229,46 @@ async def upload_video(request: Request, file: UploadFile = File(...), authoriza
     
     with open(filepath, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
+
+    # Auto transcode .mov / .mkv / .avi to web-native .mp4 H.264/AAC for 100% browser compatibility
+    if ext in [".mov", ".mkv", ".avi", ".flv"]:
+        try:
+            import subprocess
+            mp4_filename = f"web_{uuid.uuid4().hex}.mp4"
+            mp4_filepath = os.path.join(VIDEOS_DIR, mp4_filename)
+            # Try fast remux / transcode to H.264 MP4
+            cmd_conv = ["ffmpeg", "-y", "-i", filepath, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26", "-c:a", "aac", mp4_filepath]
+            res_conv = subprocess.run(cmd_conv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
+            if res_conv.returncode == 0 and os.path.exists(mp4_filepath) and os.path.getsize(mp4_filepath) > 0:
+                try:
+                    os.remove(filepath)
+                except Exception:
+                    pass
+                safe_filename = mp4_filename
+                filepath = mp4_filepath
+        except Exception as e_conv:
+            print("Video transcode to MP4 error:", e_conv)
         
-    url = f"{get_base_url(request)}/uploads/videos/{safe_filename}"
-    return {"url": url, "filename": safe_filename}
+    relative_url = f"/uploads/videos/{safe_filename}"
+    poster_url = ""
+    try:
+        import subprocess
+        ffmpeg_poster_name = f"poster_web_{uuid.uuid4().hex[:12]}.jpg"
+        ffmpeg_dest = os.path.join(IMAGES_DIR, ffmpeg_poster_name)
+        cmd = ["ffmpeg", "-y", "-ss", "00:00:03", "-i", filepath, "-vframes", "1", "-q:v", "2", ffmpeg_dest]
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+        if res.returncode == 0 and os.path.exists(ffmpeg_dest) and os.path.getsize(ffmpeg_dest) > 0:
+            poster_url = f"/uploads/images/{ffmpeg_poster_name}"
+    except Exception as e_ff:
+        print("Web video upload FFmpeg thumbnail extraction error:", e_ff)
+
+    return {
+        "url": relative_url,
+        "relativeUrl": relative_url,
+        "filename": safe_filename,
+        "posterUrl": poster_url,
+        "absoluteUrl": f"{get_base_url(request)}/uploads/videos/{safe_filename}"
+    }
 
 @app.post("/api/upload/download-url")
 async def download_remote_video_url(request: Request):
@@ -232,9 +278,26 @@ async def download_remote_video_url(request: Request):
 
     data = await request.json()
     remote_url = data.get("url", "").strip()
-    if not remote_url or not (remote_url.startswith("http://") or remote_url.startswith("https://")):
+    if not remote_url or not (remote_url.startswith("http://") or remote_url.startswith("https://") or remote_url.startswith("/uploads/")):
         raise HTTPException(status_code=400, detail="សូមបញ្ចូល URL ដែលត្រឹមត្រូវ (http:// ឬ https://)")
-    
+
+    # Shortcut: If URL is already an uploaded video on this server or domain proxy
+    if "/uploads/videos/" in remote_url:
+        filename = remote_url.split("/uploads/videos/")[-1].split("?")[0]
+        local_file = os.path.join(VIDEOS_DIR, filename)
+        if os.path.exists(local_file):
+            rel_url = f"/uploads/videos/{filename}"
+            poster_url = ""
+            poster_filename = f"poster_{os.path.splitext(filename)[0]}.jpg"
+            if os.path.exists(os.path.join(IMAGES_DIR, poster_filename)):
+                poster_url = f"/uploads/images/{poster_filename}"
+            return {
+                "url": rel_url,
+                "posterUrl": poster_url,
+                "filename": filename,
+                "absoluteUrl": f"http://us.apsara.lol:15511/uploads/videos/{filename}"
+            }
+
     try:
         parsed = urllib.parse.urlparse(remote_url)
         path = parsed.path
@@ -259,8 +322,25 @@ async def download_remote_video_url(request: Request):
         with urllib.request.urlopen(req, context=ctx, timeout=600) as response, open(filepath, "wb") as buffer:
             shutil.copyfileobj(response, buffer)
             
-        url = f"{get_base_url(request)}/uploads/videos/{safe_filename}"
-        return {"url": url, "filename": safe_filename}
+        poster_url = ""
+        try:
+            import subprocess
+            ffmpeg_poster_name = f"poster_dl_{uuid.uuid4().hex[:12]}.jpg"
+            ffmpeg_dest = os.path.join(IMAGES_DIR, ffmpeg_poster_name)
+            cmd = ["ffmpeg", "-y", "-ss", "00:00:03", "-i", filepath, "-vframes", "1", "-q:v", "2", ffmpeg_dest]
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+            if res.returncode == 0 and os.path.exists(ffmpeg_dest) and os.path.getsize(ffmpeg_dest) > 0:
+                poster_url = f"/uploads/images/{ffmpeg_poster_name}"
+        except Exception as e_ff:
+            print("Download video FFmpeg thumbnail extraction error:", e_ff)
+
+        url = f"/uploads/videos/{safe_filename}"
+        return {
+            "url": url,
+            "posterUrl": poster_url,
+            "filename": safe_filename,
+            "absoluteUrl": f"{get_base_url(request)}/uploads/videos/{safe_filename}"
+        }
     except Exception as e:
         print("download_remote_video_url error:", e)
         raise HTTPException(
@@ -1392,87 +1472,505 @@ def get_telegram_video_history(request: Request):
         print("get_telegram_video_history error:", e)
         return []
 
+USER_TELEGRAM_SESSIONS = {}
+
+def create_telegram_movie_post(
+    title: str,
+    video_url: str,
+    poster_url: str = "",
+    movie_type: str = "movie",
+    genres: list = None,
+    is_featured: bool = False,
+    is_trending: bool = True,
+    is_popular: bool = True,
+    is_latest: bool = True
+) -> dict:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    movie_id = ("m" if movie_type == "movie" else "s") + str(int(datetime.now().timestamp() * 1000))
+    created_at = datetime.now().strftime("%Y-%m-%d")
+    default_poster = poster_url if poster_url else "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=800&auto=format&fit=crop&q=80"
+    
+    genres_list = genres if genres else ["Action", "Drama"]
+    genres_json = json.dumps(genres_list)
+    
+    cursor.execute('''
+        INSERT INTO content (
+            id, title, description, poster_url, backdrop_url, trailer_url, video_url,
+            release_year, rating, duration, type, genres, is_featured, is_trending,
+            is_popular, is_latest, is_published, views, cast, director, created_at,
+            uploaded_by_user_id, uploaded_by_user_name, uploaded_by_avatar, approval_status, rejection_reason
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        movie_id, title, f"បញ្ចូលតាម Telegram Bot: {title}", default_poster, default_poster,
+        "", video_url, datetime.now().year, 8.5, "02:00:00",
+        movie_type, genres_json, 1 if is_featured else 0, 1 if is_trending else 0,
+        1 if is_popular else 0, 1 if is_latest else 0, 1, 0,
+        json.dumps([]), "Telegram Admin", created_at,
+        "admin_tg", "Telegram Bot Upload", "", "approved", ""
+    ))
+    
+    conn.commit()
+    cursor.execute("SELECT * FROM content WHERE id = ?", (movie_id,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    try:
+        add_notification(
+            nid=f"notif_{uuid.uuid4().hex[:8]}",
+            title="ភាពយន្តថ្មីបញ្ចូលតាម Telegram!",
+            message=f"{title} ត្រូវបានបោះពុម្ពផ្សាយទស្សនាបានហើយ!",
+            notif_type="new_movie",
+            target_url=f"/movie/{movie_id}" if movie_type == "movie" else "/series"
+        )
+    except Exception as e:
+        print("Auto notification error:", e)
+        
+    return {"id": movie_id, "title": title}
+
+def get_active_genres_from_db() -> list:
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM genres ORDER BY id ASC")
+        rows = cursor.fetchall()
+        conn.close()
+        if rows:
+            return [r["name"] for r in rows]
+    except Exception as e:
+        print("get_active_genres_from_db error:", e)
+    return [
+        "សកម្មភាព (Action)",
+        "វិទ្យាសាស្ត្រ (Sci-Fi)",
+        "រឿងភាគ (Drama)",
+        "ផ្សងព្រេង (Adventure)",
+        "កំប្លែង (Comedy)",
+        "រំភើប (Thriller)",
+        "រន្ធត់ (Horror)",
+        "ភាពយន្តខ្មែរ (Khmer Cinema)"
+    ]
+
+def handle_telegram_update(update: dict, token: str, base_domain: str = "http://us.apsara.lol:15511"):
+    import urllib.request
+    import urllib.parse
+    import json
+    import ssl
+    
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    def send_tg_msg(chat_id, text, reply_markup=None):
+        try:
+            url = f"https://api.telegram.org/bot{token}/sendMessage"
+            data_dict = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+            if reply_markup:
+                data_dict["reply_markup"] = json.dumps(reply_markup)
+            payload = urllib.parse.urlencode(data_dict).encode('utf-8')
+            req = urllib.request.Request(url, data=payload)
+            urllib.request.urlopen(req, context=ctx, timeout=10)
+        except Exception as err:
+            print("send_tg_msg error:", err)
+
+    def answer_callback(cb_id):
+        try:
+            url = f"https://api.telegram.org/bot{token}/answerCallbackQuery"
+            payload = urllib.parse.urlencode({"callback_query_id": cb_id}).encode('utf-8')
+            req = urllib.request.Request(url, data=payload)
+            urllib.request.urlopen(req, context=ctx, timeout=5)
+        except Exception:
+            pass
+
+    main_keyboard = {
+        "inline_keyboard": [
+            [{"text": "📁 Upload វីដេអូតែប៉ុណ្ណោះ", "callback_data": "mode_upload_only"}],
+            [{"text": "🎬 Upload វីដេអូ + បញ្ចូលចំណងជើងរឿង (Auto Post)", "callback_data": "mode_upload_post"}]
+        ]
+    }
+
+    type_keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": "🎬 ភាពយន្តទោល (Movie)", "callback_data": "type_movie"},
+                {"text": "📺 រឿងភាគ (Series)", "callback_data": "type_series"}
+            ]
+        ]
+    }
+
+    def get_genre_keyboard(selected_genres):
+        active_genres = get_active_genres_from_db()
+        buttons = []
+        row = []
+        for idx, g_name in enumerate(active_genres):
+            is_sel = g_name in selected_genres
+            prefix = "✅ " if is_sel else ""
+            row.append({"text": f"{prefix}{g_name}", "callback_data": f"tg_g_{idx}"})
+            if len(row) == 2:
+                buttons.append(row)
+                row = []
+        if row:
+            buttons.append(row)
+        buttons.append([{"text": "➡️ បន្តទៅការកំណត់ទំព័រដើម (Next)", "callback_data": "step_sections"}])
+        return {"inline_keyboard": buttons}
+
+    def get_section_keyboard(session):
+        f = "✅ " if session.get("is_featured") else ""
+        t = "✅ " if session.get("is_trending") else ""
+        p = "✅ " if session.get("is_popular") else ""
+        l = "✅ " if session.get("is_latest") else ""
+        return {
+            "inline_keyboard": [
+                [
+                    {"text": f"{f}Hero Banner", "callback_data": "toggle_sec_featured"},
+                    {"text": f"{t}កំពុងពេញនិយម (Trending)", "callback_data": "toggle_sec_trending"}
+                ],
+                [
+                    {"text": f"{p}ភាពយន្តល្បីៗ (Popular)", "callback_data": "toggle_sec_popular"},
+                    {"text": f"{l}ណែនាំពិសេស (Recommended)", "callback_data": "toggle_sec_latest"}
+                ],
+                [
+                    {"text": "🚀 ជ្រើសរើសទាំងអស់ (Select All)", "callback_data": "sec_all"},
+                    {"text": "➡️ រំលង/ផ្ញើវីដេអូ (Next: Send Video)", "callback_data": "step_video"}
+                ]
+            ]
+        }
+
+    if "callback_query" in update:
+        cb = update["callback_query"]
+        cb_id = cb.get("id")
+        chat_id = cb.get("message", {}).get("chat", {}).get("id")
+        data = cb.get("data", "")
+        answer_callback(cb_id)
+
+        session = USER_TELEGRAM_SESSIONS.get(chat_id, {
+            "mode": "upload_post",
+            "step": "awaiting_title",
+            "type": "movie",
+            "genres": ["Action"],
+            "is_featured": False,
+            "is_trending": True,
+            "is_popular": True,
+            "is_latest": True
+        })
+
+        if data == "mode_upload_only":
+            USER_TELEGRAM_SESSIONS[chat_id] = {"mode": "upload_only", "step": "idle"}
+            send_tg_msg(
+                chat_id,
+                "📁 <b>របៀប: Upload វីដេអូតែប៉ុណ្ណោះ</b>\n\n"
+                "សូមផ្ញើឯកសារវីដេអូ (.mp4, .mkv, .mov) មកកាន់ Bot ឥឡូវនេះ ប្រព័ន្ធនឹងទាញយកទៅរក្សាទុកក្នុង Server និងបង្កើតជា Video Link ជូនស្វ័យប្រវត្តិ!"
+            )
+        elif data == "mode_upload_post":
+            USER_TELEGRAM_SESSIONS[chat_id] = {
+                "mode": "upload_post",
+                "step": "awaiting_title",
+                "type": "movie",
+                "genres": ["Action"],
+                "is_featured": False,
+                "is_trending": True,
+                "is_popular": True,
+                "is_latest": True
+            }
+            send_tg_msg(
+                chat_id,
+                "🎬 <b>របៀប: Upload វីដេអូ + បញ្ចូលចំណងជើងរឿង (Auto Post)</b>\n\n"
+                "✍️ <b>ជំហានទី ១:</b> សូមវាយផ្ញើ <b>ចំណងជើងរឿង (Movie Title)</b> មកកាន់ Bot ឥឡូវនេះ..."
+            )
+        elif data in ["type_movie", "type_series"]:
+            m_type = "movie" if data == "type_movie" else "series"
+            session["type"] = m_type
+            session["step"] = "awaiting_genre"
+            USER_TELEGRAM_SESSIONS[chat_id] = session
+            t_label = "ភាពយន្តទោល (Movie)" if m_type == "movie" else "រឿងភាគ (Series)"
+            send_tg_msg(
+                chat_id,
+                f"✅ <b>ប្រភេទរឿង: {t_label}</b>\n\n"
+                f"🏷️ <b>ជំហានទី ៣:</b> សូមជ្រើសរើស <b>ប្រភេទភាពយន្ត (Genres)</b> ខាងក្រោម៖",
+                reply_markup=get_genre_keyboard(session.get("genres", []))
+            )
+        elif data.startswith("tg_g_") or data.startswith("toggle_genre_"):
+            try:
+                g_name = ""
+                if data.startswith("tg_g_"):
+                    idx = int(data.replace("tg_g_", ""))
+                    active_genres = get_active_genres_from_db()
+                    if 0 <= idx < len(active_genres):
+                        g_name = active_genres[idx]
+                else:
+                    g_name = data.replace("toggle_genre_", "")
+                
+                if g_name:
+                    cur_g = session.get("genres", [])
+                    if g_name in cur_g:
+                        cur_g.remove(g_name)
+                    else:
+                        cur_g.append(g_name)
+                    session["genres"] = cur_g
+                    USER_TELEGRAM_SESSIONS[chat_id] = session
+                    send_tg_msg(
+                        chat_id,
+                        f"🏷️ <b>ប្រភេទភាពយន្តដែលបានជ្រើសរើស:</b> {', '.join(cur_g) if cur_g else 'គ្មាន'}\n"
+                        f"សូមជ្រើសរើសបន្ថែម ឬចុច បន្ត៖",
+                        reply_markup=get_genre_keyboard(cur_g)
+                    )
+            except Exception as err:
+                print("genre toggle error:", err)
+        elif data == "step_sections":
+            session["step"] = "awaiting_sections"
+            USER_TELEGRAM_SESSIONS[chat_id] = session
+            send_tg_msg(
+                chat_id,
+                "📌 <b>ជំហានទី ៤:</b> កំណត់ការបង្ហាញលើទំព័រដើម (Homepage Sections)៖",
+                reply_markup=get_section_keyboard(session)
+            )
+        elif data.startswith("toggle_sec_"):
+            sec_key = data.replace("toggle_sec_", "is_")
+            session[sec_key] = not session.get(sec_key, False)
+            USER_TELEGRAM_SESSIONS[chat_id] = session
+            send_tg_msg(
+                chat_id,
+                "📌 <b>កំណត់ការបង្ហាញលើទំព័រដើម៖</b>",
+                reply_markup=get_section_keyboard(session)
+            )
+        elif data == "sec_all":
+            session["is_featured"] = True
+            session["is_trending"] = True
+            session["is_popular"] = True
+            session["is_latest"] = True
+            USER_TELEGRAM_SESSIONS[chat_id] = session
+            send_tg_msg(
+                chat_id,
+                "📌 <b>បានជ្រើសរើសបង្ហាញគ្រប់ផ្នែកទាំងអស់លើទំព័រដើម!</b>",
+                reply_markup=get_section_keyboard(session)
+            )
+        elif data == "step_video":
+            session["step"] = "awaiting_video"
+            USER_TELEGRAM_SESSIONS[chat_id] = session
+            title = session.get("title", "ភាពយន្តថ្មី")
+            send_tg_msg(
+                chat_id,
+                f"📹 <b>ជំហានចុងក្រោយ:</b> សូមផ្ញើឯកសារវីដេអូ (.mp4, .mkv, .mov) នៃរឿង «<b>{title}</b>» មកកាន់ Bot ឥឡូវនេះ ដើម្បី Upload និងបោះពុម្ពផ្សាយចូល Website..."
+            )
+        return
+
+    message = update.get("message") or update.get("channel_post")
+    if not message:
+        return
+
+    chat_id = message.get("chat", {}).get("id")
+    text = (message.get("text") or "").strip()
+    file_obj = message.get("video") or message.get("document") or message.get("animation")
+    session = USER_TELEGRAM_SESSIONS.get(chat_id, {"mode": "upload_only", "step": "idle"})
+
+    if text and (text.startswith("/start") or text.startswith("/menu") or text.lower() == "menu"):
+        USER_TELEGRAM_SESSIONS[chat_id] = {"mode": "upload_only", "step": "idle"}
+        send_tg_msg(
+            chat_id,
+            "👋 <b>សូមស្វាគមន៍មកកាន់ Telegram Video Bot!</b>\n\n"
+            "សូមជ្រើសរើសជម្រើសខាងក្រោម៖\n"
+            "១. 📁 <b>Upload វីដេអូតែប៉ុណ្ណោះ</b>: ទាញយកវីដេអូទុកក្នុង Server & បង្កើត Video Link\n"
+            "២. 🎬 <b>Upload វីដេអូ + បញ្ចូលចំណងជើងរឿង (Auto Post)</b>: កំណត់ព័ត៌មាន និងបោះពុម្ពផ្សាយរឿងចូល Web ស្វ័យប្រវត្តិ",
+            reply_markup=main_keyboard
+        )
+        return
+
+    if text and not file_obj:
+        if session.get("step") == "awaiting_title":
+            title = text
+            session["title"] = title
+            session["step"] = "awaiting_type"
+            USER_TELEGRAM_SESSIONS[chat_id] = session
+            send_tg_msg(
+                chat_id,
+                f"✅ <b>ចំណងជើងរឿង: «{title}»</b>\n\n"
+                f"🎭 <b>ជំហានទី ២:</b> សូមជ្រើសរើស <b>ប្រភេទរឿង (Category)</b> ខាងក្រោម៖",
+                reply_markup=type_keyboard
+            )
+            return
+        else:
+            send_tg_msg(
+                chat_id,
+                "💡 <b>សូមជ្រើសរើសជម្រើស ឬផ្ញើឯកសារវីដេអូផ្ទាល់៖</b>",
+                reply_markup=main_keyboard
+            )
+            return
+
+    # Check if user sent a Photo (Custom Poster)
+    photo_obj = message.get("photo")
+    if photo_obj and isinstance(photo_obj, list) and len(photo_obj) > 0:
+        try:
+            best_photo = photo_obj[-1]
+            p_file_id = best_photo.get("file_id")
+            get_p_file_url = f"https://api.telegram.org/bot{token}/getFile?file_id={p_file_id}"
+            req = urllib.request.Request(get_p_file_url)
+            with urllib.request.urlopen(req, context=ctx, timeout=15) as pres:
+                p_file_info = json.loads(pres.read().decode('utf-8'))
+            if p_file_info.get("ok"):
+                p_file_path = p_file_info["result"]["file_path"]
+                p_dl_url = f"https://api.telegram.org/file/bot{token}/{p_file_path}"
+                safe_poster_name = f"poster_{uuid.uuid4().hex[:12]}.jpg"
+                poster_dest_path = os.path.join(IMAGES_DIR, safe_poster_name)
+                
+                p_dl_req = urllib.request.Request(p_dl_url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(p_dl_req, context=ctx, timeout=60) as response, open(poster_dest_path, "wb") as out_file:
+                    shutil.copyfileobj(response, out_file)
+                
+                session["custom_poster"] = f"/uploads/images/{safe_poster_name}"
+                USER_TELEGRAM_SESSIONS[chat_id] = session
+                
+                send_tg_msg(
+                    chat_id,
+                    f"🖼️ <b>បានទទួល និងរក្សាទុករូបភាព Poster រួចរាល់!</b>\n\n"
+                    f"សូមផ្ញើ <b>ឯកសារវីដេអូ (.mp4, .mkv, .mov)</b> មកកាន់ Bot ឥឡូវនេះ ដើម្បីបោះពុម្ពផ្សាយចូល Website..."
+                )
+                return
+        except Exception as err_p:
+            print("photo upload error:", err_p)
+
+    if file_obj:
+        file_id = file_obj.get("file_id")
+        file_name = file_obj.get("file_name") or f"tg_video_{uuid.uuid4().hex[:8]}.mp4"
+        ext = os.path.splitext(file_name)[1].lower() or ".mp4"
+
+        current_mode = session.get("mode", "upload_only")
+        current_title = session.get("title")
+
+        send_tg_msg(chat_id, f"⏳ <b>កំពុងទាញយក និងរក្សាទុកវីដេអូក្នុង Server...</b>\nFILE: <code>{file_name}</code>")
+
+        get_file_url = f"https://api.telegram.org/bot{token}/getFile?file_id={file_id}"
+        req = urllib.request.Request(get_file_url)
+        with urllib.request.urlopen(req, context=ctx, timeout=15) as fres:
+            file_info = json.loads(fres.read().decode('utf-8'))
+
+        if file_info.get("ok"):
+            file_path = file_info["result"]["file_path"]
+            dl_url = f"https://api.telegram.org/file/bot{token}/{file_path}"
+
+            safe_filename = f"tlg_{uuid.uuid4().hex[:12]}{ext}"
+            dest_path = os.path.join(VIDEOS_DIR, safe_filename)
+
+            dl_req = urllib.request.Request(dl_url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(dl_req, context=ctx, timeout=600) as response, open(dest_path, "wb") as out_file:
+                shutil.copyfileobj(response, out_file)
+
+            # Auto transcode .mov / .mkv / .avi to web-native .mp4 H.264/AAC for 100% browser compatibility
+            if ext in [".mov", ".mkv", ".avi", ".flv"]:
+                try:
+                    import subprocess
+                    mp4_filename = f"tlg_web_{uuid.uuid4().hex[:12]}.mp4"
+                    mp4_dest_path = os.path.join(VIDEOS_DIR, mp4_filename)
+                    cmd_conv = ["ffmpeg", "-y", "-i", dest_path, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26", "-c:a", "aac", mp4_dest_path]
+                    res_conv = subprocess.run(cmd_conv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
+                    if res_conv.returncode == 0 and os.path.exists(mp4_dest_path) and os.path.getsize(mp4_dest_path) > 0:
+                        try:
+                            os.remove(dest_path)
+                        except Exception:
+                            pass
+                        safe_filename = mp4_filename
+                        dest_path = mp4_dest_path
+                except Exception as e_conv:
+                    print("Telegram video transcode error:", e_conv)
+
+            video_public_url = f"http://us.apsara.lol:15511/uploads/videos/{safe_filename}"
+            relative_video_url = f"/uploads/videos/{safe_filename}"
+
+            # Auto extract/download video thumbnail for Poster
+            auto_poster_url = session.get("custom_poster", "")
+            
+            # 1. Try Telegram native video thumbnail if custom poster not set
+            if not auto_poster_url:
+                tg_thumb = file_obj.get("thumbnail") or file_obj.get("thumb")
+                if tg_thumb and isinstance(tg_thumb, dict) and tg_thumb.get("file_id"):
+                    try:
+                        t_file_id = tg_thumb.get("file_id")
+                        get_t_url = f"https://api.telegram.org/bot{token}/getFile?file_id={t_file_id}"
+                        req = urllib.request.Request(get_t_url)
+                        with urllib.request.urlopen(req, context=ctx, timeout=15) as tres:
+                            t_info = json.loads(tres.read().decode('utf-8'))
+                        if t_info.get("ok"):
+                            t_file_path = t_info["result"]["file_path"]
+                            t_dl_url = f"https://api.telegram.org/file/bot{token}/{t_file_path}"
+                            t_poster_name = f"poster_tg_{uuid.uuid4().hex[:12]}.jpg"
+                            t_dest = os.path.join(IMAGES_DIR, t_poster_name)
+                            t_req = urllib.request.Request(t_dl_url, headers={"User-Agent": "Mozilla/5.0"})
+                            with urllib.request.urlopen(t_req, context=ctx, timeout=30) as res, open(t_dest, "wb") as out:
+                                shutil.copyfileobj(res, out)
+                            auto_poster_url = f"/uploads/images/{t_poster_name}"
+                    except Exception as e_thumb:
+                        print("Telegram thumbnail download error:", e_thumb)
+
+            # 2. Try FFmpeg video frame extraction if available
+            if not auto_poster_url or "poster_tg_" in auto_poster_url:
+                try:
+                    import subprocess
+                    ffmpeg_poster_name = f"poster_ff_{uuid.uuid4().hex[:12]}.jpg"
+                    ffmpeg_dest = os.path.join(IMAGES_DIR, ffmpeg_poster_name)
+                    cmd = ["ffmpeg", "-y", "-ss", "00:00:03", "-i", dest_path, "-vframes", "1", "-q:v", "2", ffmpeg_dest]
+                    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+                    if res.returncode == 0 and os.path.exists(ffmpeg_dest) and os.path.getsize(ffmpeg_dest) > 0:
+                        auto_poster_url = f"/uploads/images/{ffmpeg_poster_name}"
+                except Exception as e_ff:
+                    print("FFmpeg poster extraction fallback error:", e_ff)
+
+            global LATEST_TELEGRAM_UPLOAD
+            LATEST_TELEGRAM_UPLOAD = {
+                "url": video_public_url,
+                "posterUrl": auto_poster_url,
+                "filename": file_name,
+                "timestamp": int(time.time() * 1000)
+            }
+            set_setting("latest_telegram_upload", json.dumps(LATEST_TELEGRAM_UPLOAD))
+
+            if current_mode == "upload_post" and current_title:
+                created = create_telegram_movie_post(
+                    title=current_title,
+                    video_url=relative_video_url,
+                    poster_url=auto_poster_url,
+                    movie_type=session.get("type", "movie"),
+                    genres=session.get("genres", ["Action"]),
+                    is_featured=session.get("is_featured", False),
+                    is_trending=session.get("is_trending", True),
+                    is_popular=session.get("is_popular", True),
+                    is_latest=session.get("is_latest", True)
+                )
+                movie_id = created.get("id", "")
+                USER_TELEGRAM_SESSIONS[chat_id] = {"mode": "upload_only", "step": "idle"}
+
+                g_text = ", ".join(session.get("genres", ["Action"]))
+                t_text = "ភាពយន្តទោល (Movie)" if session.get("type") == "movie" else "រឿងភាគ (Series)"
+
+                send_tg_msg(
+                    chat_id,
+                    f"🎉 <b>បោះពុម្ពផ្សាយរឿងចូល Website ដោយជោគជ័យ!</b>\n\n"
+                    f"🎬 <b>ចំណងជើងរឿង:</b> {current_title}\n"
+                    f"🎭 <b>ប្រភេទ:</b> {t_text}\n"
+                    f"🏷️ <b>Genres:</b> {g_text}\n"
+                    f"📁 <b>ឈ្មោះឯកសារ:</b> {file_name}\n"
+                    f"🔗 <b>Video URL:</b> <code>{video_public_url}</code>\n"
+                    f"🌐 <b>ទស្សនានៅលើ Web:</b> https://terktlahub.vercel.app/movie/{movie_id}\n\n"
+                    f"✨ <b>រឿងនេះត្រូវគេមើលបានភ្លាមៗនៅលើ Website និង App!</b>",
+                    reply_markup=main_keyboard
+                )
+            else:
+                send_tg_msg(
+                    chat_id,
+                    f"✅ <b>Upload វីដេអូទៅ Server ជោគជ័យ!</b>\n\n"
+                    f"📁 <b>ឈ្មោះឯកសារ:</b> {file_name}\n"
+                    f"🔗 <b>Video URL:</b> <code>{video_public_url}</code>\n\n"
+                    f"✨ <b>Link នេះត្រូវរត់ចូលប្រអប់ Video ក្នុង Admin Web ដោយស្វ័យប្រវត្តិ!</b>",
+                    reply_markup=main_keyboard
+                )
+
 @app.post("/api/telegram/webhook")
 async def telegram_webhook_handler(request: Request):
     try:
         data = await request.json()
-        message = data.get("message") or data.get("channel_post")
-        if not message:
-            return {"status": "ok"}
-            
-        chat_id = message.get("chat", {}).get("id")
-        text = message.get("text", "")
-        
         token = get_setting("telegram_bot_token")
         if not token:
             return {"status": "no_bot_token"}
-            
-        import urllib.request
-        import urllib.parse
-        import json
-        import ssl
-        
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-
-        def send_tg_reply(reply_text: str):
-            try:
-                reply_url = f"https://api.telegram.org/bot{token}/sendMessage"
-                payload = urllib.parse.urlencode({"chat_id": chat_id, "text": reply_text, "parse_mode": "HTML"}).encode('utf-8')
-                req = urllib.request.Request(reply_url, data=payload)
-                urllib.request.urlopen(req, context=ctx, timeout=10)
-            except Exception as err:
-                print("send_tg_reply error:", err)
-
-        file_obj = message.get("video") or message.get("document") or message.get("animation")
-        if file_obj:
-            file_id = file_obj.get("file_id")
-            file_name = file_obj.get("file_name") or f"tg_video_{uuid.uuid4().hex[:8]}.mp4"
-            ext = os.path.splitext(file_name)[1].lower() or ".mp4"
-            
-            send_tg_reply(f"⏳ <b>កំពុងទាញយក និងរក្សាទុកវីដេអូក្នុង Server...</b>\nFILE: <code>{file_name}</code>")
-            
-            get_file_url = f"https://api.telegram.org/bot{token}/getFile?file_id={file_id}"
-            req = urllib.request.Request(get_file_url)
-            with urllib.request.urlopen(req, context=ctx, timeout=15) as res:
-                file_info = json.loads(res.read().decode('utf-8'))
-                
-            if file_info.get("ok"):
-                file_path = file_info["result"]["file_path"]
-                dl_url = f"https://api.telegram.org/file/bot{token}/{file_path}"
-                
-                safe_filename = f"tlg_{uuid.uuid4().hex[:12]}{ext}"
-                dest_path = os.path.join(VIDEOS_DIR, safe_filename)
-                
-                dl_req = urllib.request.Request(dl_url, headers={"User-Agent": "Mozilla/5.0"})
-                with urllib.request.urlopen(dl_req, context=ctx, timeout=600) as response, open(dest_path, "wb") as out_file:
-                    shutil.copyfileobj(response, out_file)
-                    
-                video_public_url = f"{get_base_url(request)}/uploads/videos/{safe_filename}"
-                
-                global LATEST_TELEGRAM_UPLOAD
-                LATEST_TELEGRAM_UPLOAD = {
-                    "url": video_public_url,
-                    "filename": file_name,
-                    "timestamp": int(time.time() * 1000)
-                }
-                set_setting("latest_telegram_upload", json.dumps(LATEST_TELEGRAM_UPLOAD))
-
-                reply_msg = (
-                    f"✅ <b>Upload វីដេអូទៅ Server ជោគជ័យ!</b>\n\n"
-                    f"📁 <b>ឈ្មោះឯកសារ:</b> {file_name}\n"
-                    f"🔗 <b>Video URL (សម្រាប់បញ្ចូលក្នុង Web):</b>\n"
-                    f"<code>{video_public_url}</code>\n\n"
-                    f"✨ <b>Link នេះត្រូវបានបញ្ជូនចូលប្រអប់ Video ក្នុង Admin Web ដោយស្វ័យប្រវត្តិ!</b>"
-                )
-                send_tg_reply(reply_msg)
-                return {"status": "success", "url": video_public_url}
-        elif text and text.startswith("/start"):
-            send_tg_reply(
-                "👋 <b>សូមស្វាគមន៍មកកាន់ Telegram Video Upload Bot!</b>\n\n"
-                "លោកអ្នកអាចផ្ញើឯកសារវីដេអូ (.mp4, .mkv, .mov) មកកាន់ Bot នេះផ្ទាល់ នោះប្រព័ន្ធនឹង Upload ចូល Server និងបង្កើតជា Link URL ជូនស្វ័យប្រវត្តិ!"
-            )
+        base_domain = get_base_url(request)
+        handle_telegram_update(data, token, base_domain)
     except Exception as e:
         print("telegram_webhook_handler error:", e)
     return {"status": "ok"}
@@ -1509,7 +2007,7 @@ def set_telegram_webhook(request: Request, authorization: Optional[str] = Header
 LAST_TELEGRAM_UPDATE_ID = 0
 
 def telegram_polling_worker():
-    global LAST_TELEGRAM_UPDATE_ID, LATEST_TELEGRAM_UPLOAD
+    global LAST_TELEGRAM_UPDATE_ID
     while True:
         try:
             token = get_setting("telegram_bot_token")
@@ -1530,65 +2028,7 @@ def telegram_polling_worker():
                 if data.get("ok"):
                     for update in data.get("result", []):
                         LAST_TELEGRAM_UPDATE_ID = update["update_id"]
-                        message = update.get("message") or update.get("channel_post")
-                        if not message:
-                            continue
-                        chat_id = message.get("chat", {}).get("id")
-                        text = message.get("text", "")
-
-                        def send_tg_reply(reply_text: str):
-                            try:
-                                reply_url = f"https://api.telegram.org/bot{token}/sendMessage"
-                                payload = urllib.parse.urlencode({"chat_id": chat_id, "text": reply_text, "parse_mode": "HTML"}).encode('utf-8')
-                                req = urllib.request.Request(reply_url, data=payload)
-                                urllib.request.urlopen(req, context=ctx, timeout=10)
-                            except Exception:
-                                pass
-
-                        file_obj = message.get("video") or message.get("document") or message.get("animation")
-                        if file_obj:
-                            file_id = file_obj.get("file_id")
-                            file_name = file_obj.get("file_name") or f"tg_video_{uuid.uuid4().hex[:8]}.mp4"
-                            ext = os.path.splitext(file_name)[1].lower() or ".mp4"
-
-                            send_tg_reply(f"⏳ <b>កំពុងទាញយក និងរក្សាទុកវីដេអូក្នុង Server...</b>\nFILE: <code>{file_name}</code>")
-
-                            get_file_url = f"https://api.telegram.org/bot{token}/getFile?file_id={file_id}"
-                            req = urllib.request.Request(get_file_url)
-                            with urllib.request.urlopen(req, context=ctx, timeout=15) as fres:
-                                file_info = json.loads(fres.read().decode('utf-8'))
-
-                            if file_info.get("ok"):
-                                file_path = file_info["result"]["file_path"]
-                                dl_url = f"https://api.telegram.org/file/bot{token}/{file_path}"
-
-                                safe_filename = f"tlg_{uuid.uuid4().hex[:12]}{ext}"
-                                dest_path = os.path.join(VIDEOS_DIR, safe_filename)
-
-                                dl_req = urllib.request.Request(dl_url, headers={"User-Agent": "Mozilla/5.0"})
-                                with urllib.request.urlopen(dl_req, context=ctx, timeout=600) as response, open(dest_path, "wb") as out_file:
-                                    shutil.copyfileobj(response, out_file)
-
-                                video_public_url = f"http://us.apsara.lol:15511/uploads/videos/{safe_filename}"
-
-                                LATEST_TELEGRAM_UPLOAD = {
-                                    "url": video_public_url,
-                                    "filename": file_name,
-                                    "timestamp": int(time.time() * 1000)
-                                }
-                                set_setting("latest_telegram_upload", json.dumps(LATEST_TELEGRAM_UPLOAD))
-
-                                send_tg_reply(
-                                    f"✅ <b>Upload វីដេអូទៅ Server ជោគជ័យ!</b>\n\n"
-                                    f"📁 <b>ឈ្មោះ:</b> {file_name}\n"
-                                    f"🔗 <b>URL:</b> <code>{video_public_url}</code>\n\n"
-                                    f"✨ <b>Link នេះត្រូវរត់ចូលប្រអប់ Video ក្នុង Web ស្វ័យប្រវត្តិ!</b>"
-                                )
-                        elif text and text.startswith("/start"):
-                            send_tg_reply(
-                                "👋 <b>សូមស្វាគមន៍មកកាន់ Telegram Video Upload Bot!</b>\n\n"
-                                "លោកអ្នកអាចផ្ញើឯកសារវីដេអូ (.mp4, .mkv, .mov) មកកាន់ Bot នេះផ្ទាល់ នោះប្រព័ន្ធនឹង Upload ចូល Server និងបង្កើតជា Link URL ជូនស្វ័យប្រវត្តិ!"
-                            )
+                        handle_telegram_update(update, token, "http://us.apsara.lol:15511")
         except Exception as err:
             time.sleep(3)
         time.sleep(2)

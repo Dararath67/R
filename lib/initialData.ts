@@ -1,10 +1,9 @@
 import { Movie, Episode, Genre, User } from './types';
 
-// Real open-source video stream template helpers
 export const SAMPLE_VIDEOS = {
-  tearsOfSteel: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
-  bigBuckBunny: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-  sintel: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
+  tearsOfSteel: '',
+  bigBuckBunny: '',
+  sintel: '',
 };
 
 export const INITIAL_GENRES: Genre[] = [

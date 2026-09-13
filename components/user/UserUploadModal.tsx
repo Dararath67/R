@@ -83,8 +83,8 @@ export const UserUploadModal: React.FC<UserUploadModalProps> = ({ isOpen, onClos
         throw new Error('បរាជ័យក្នុងការ Upload វីដេអូពី Device');
       }
 
-      // 2. Upload Poster Image from Device (if selected)
-      let posterUrl = 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=800';
+      // 2. Upload Poster Image from Device (if selected, otherwise use auto-extracted poster from video)
+      let posterUrl = videoRes?.posterUrl || '';
       if (posterFile) {
         setUploadProgress('កំពុង Upload រូបភាព Poster...');
         const posterRes = await api.uploadImage(posterFile);
@@ -97,30 +97,30 @@ export const UserUploadModal: React.FC<UserUploadModalProps> = ({ isOpen, onClos
       setUploadProgress('កំពុងរក្សាទុកព័ត៌មាន...');
       await addMovie({
         title: title.trim(),
-        description: description.trim() || 'វីដេអូត្រូវបាន Upload ដោយអ្នកប្រើប្រាស់ពី Device',
+        description: description.trim() || 'វីដេអូត្រូវបាន Upload ដោយជោគជ័យ',
         posterUrl: posterUrl,
         backdropUrl: posterUrl,
         trailerUrl: '',
         videoUrl: videoUrl,
         releaseYear: new Date().getFullYear(),
-        rating: 8.0,
+        rating: 8.5,
         duration: '1h 30m',
         type: 'movie',
         genres: ['General'],
         isFeatured: false,
-        isTrending: false,
-        isPopular: false,
+        isTrending: true,
+        isPopular: true,
         isLatest: true,
-        isPublished: false, // Default to FALSE until Admin approves and sets Category
+        isPublished: true,
         cast: [],
         director: currentUser?.name || 'User Upload',
         uploadedByUserId: currentUser?.id,
         uploadedByUserName: currentUser?.name,
         uploadedByAvatar: currentUser?.avatar,
-        approvalStatus: 'pending',
+        approvalStatus: 'approved',
       } as any);
 
-      setSuccessMsg('វីដេអូរបស់អ្នកត្រូវបាន Upload ពី Device ជោគជ័យ! សូមរង់ចាំ Admin ពិនិត្យ និងដាក់ Genre/Category។');
+      setSuccessMsg('វីដេអូរបស់អ្នកត្រូវបាន Upload និងផ្សព្វផ្សាយលើ Website ជោគជ័យ!');
       setTitle('');
       setDescription('');
       setVideoFile(null);
