@@ -1233,5 +1233,63 @@ export const api = {
       return null;
     }
   },
+
+  // Bulk Website Movie Crawler
+  async crawlBulkSiteMovies(siteUrl: string, limit: number = 25, autoSave: boolean = false): Promise<{
+    status: string;
+    siteUrl: string;
+    totalScanned: number;
+    importedCount: number;
+    duplicateCount: number;
+    items: Array<{
+      id?: string;
+      title: string;
+      description?: string;
+      videoUrl: string;
+      posterUrl?: string;
+      backdropUrl?: string;
+      releaseYear?: number;
+      genres?: string[];
+      duration?: string;
+      rating?: number;
+      sourceUrl?: string;
+      status: 'ready' | 'already_exists' | 'imported';
+    }>;
+  }> {
+    const res = await fetchWithFailover('/admin/crawler/bulk-fetch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ siteUrl, limit, autoSave }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'បរាជ័យក្នុងការទាញយកភាពយន្តពីវេបសាយ');
+    }
+    return await res.json();
+  },
+
+  async importBulkMovies(items: Array<{
+    title: string;
+    description?: string;
+    videoUrl: string;
+    posterUrl?: string;
+    backdropUrl?: string;
+    releaseYear?: number;
+    genres?: string[];
+    duration?: string;
+    rating?: number;
+  }>): Promise<{ status: string; imported: number; duplicates: number; message: string }> {
+    const res = await fetchWithFailover('/admin/crawler/bulk-import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ items }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'បរាជ័យក្នុងការ Import ភាពយន្តចូលប្រព័ន្ធ');
+    }
+    return await res.json();
+  },
 };
+
 

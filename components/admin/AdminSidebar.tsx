@@ -15,6 +15,7 @@ import {
   Headphones,
   AlertTriangle,
   FileQuestion,
+  Globe,
   X,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
@@ -33,6 +34,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ mobileOpen, onMobile
   const menuItems = [
     { name: 'ផ្ទាំងព័ត៌មានទូទៅ', path: '/admin', icon: LayoutDashboard },
     { name: 'គ្រប់គ្រងភាពយន្ត', path: '/admin/movies', icon: Film },
+    { name: 'ទាញយកពីវេបសាយ (Bulk)', path: '/admin/crawler', icon: Globe },
     { name: 'រាយការណ៍វីដេអូខូច', path: '/admin/reports', icon: AlertTriangle },
     { name: 'គ្រប់គ្រងអ្នកប្រើប្រាស់', path: '/admin/users', icon: Users },
     { name: 'ឆាតគាំទ្រ (Support Chat)', path: '/admin/support', icon: Headphones },

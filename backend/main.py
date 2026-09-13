@@ -3075,3 +3075,207 @@ def get_analytics(authorization: Optional[str] = Header(None)):
     require_admin_role(authorization)
     return get_admin_analytics()
 
+# ---------------- BULK WEBSITE MOVIE CRAWLER & AUTO-IMPORTER ----------------
+@app.post("/api/admin/crawler/bulk-fetch")
+def bulk_crawl_movies_endpoint(payload: dict, authorization: Optional[str] = Header(None)):
+    """
+    Crawls an entire external website (e.g. jvpkh.xyz, Blogger, WordPress, or HTML archive),
+    extracts all videos, titles, posters, release years, and descriptions.
+    """
+    require_admin_role(authorization)
+    site_url = payload.get("siteUrl", "https://www.jvpkh.xyz")
+    limit = int(payload.get("limit", 25))
+    auto_save = bool(payload.get("autoSave", False))
+
+    import urllib.request
+    import urllib.parse
+    import ssl
+    import json
+
+    clean_site_url = re.sub(r'\s+', '', (site_url or "").strip())
+    if not clean_site_url or not (clean_site_url.startswith("http://") or clean_site_url.startswith("https://")):
+        clean_site_url = "https://www.jvpkh.xyz"
+
+    parsed_u = urllib.parse.urlparse(clean_site_url)
+    domain = f"{parsed_u.scheme}://{parsed_u.netloc}"
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    limit = max(1, min(limit, 100))
+    feed_url = f"{domain}/feeds/posts/default?alt=json&max-results={limit}"
+
+    entries = []
+    try:
+        req = urllib.request.Request(feed_url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/json,text/html"
+        })
+        with urllib.request.urlopen(req, context=ctx, timeout=15) as res:
+            feed_data = json.loads(res.read().decode('utf-8'))
+            entries = feed_data.get('feed', {}).get('entry', [])
+    except Exception as e:
+        print("Blogger feed fetch error:", e)
+
+    # Fallback: if feed is empty or site is not Blogger, scrape main page HTML links
+    if not entries:
+        try:
+            req_main = urllib.request.Request(clean_site_url, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            })
+            with urllib.request.urlopen(req_main, context=ctx, timeout=12) as res_main:
+                main_html = res_main.read().decode('utf-8', errors='ignore')
+                raw_links = re.findall(r'href=["\'](https?://[^"\']+\.(?:html|php)[^"\']*)["\']', main_html, re.IGNORECASE)
+                unique_links = []
+                for l in raw_links:
+                    if domain in l and l not in unique_links and not any(ign in l for ign in ['login', 'register', 'contact', 'about', 'privacy', 'terms', 'search']):
+                        unique_links.append(l)
+                        if len(unique_links) >= limit:
+                            break
+                for l in unique_links:
+                    entries.append({"link": [{"rel": "alternate", "href": l}]})
+        except Exception as e_main:
+            print("Fallback HTML crawler error:", e_main)
+
+    results = []
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    imported_count = 0
+    duplicate_count = 0
+
+    for idx, entry in enumerate(entries, 1):
+        links = [l.get('href') for l in entry.get('link', []) if l.get('rel') == 'alternate' or not l.get('rel')]
+        post_link = links[0] if links else ""
+        if not post_link:
+            continue
+
+        raw_title = entry.get('title', {}).get('$t', '') if isinstance(entry.get('title'), dict) else ""
+        extracted = extract_media_from_webpage(post_link)
+        
+        final_title = extracted.get('title') or raw_title or f"ភាពយន្ត {idx}"
+        video_url = extracted.get('videoUrl') or ""
+        poster_url = extracted.get('posterUrl') or ""
+        backdrop_url = extracted.get('backdropUrl') or poster_url
+        release_year = extracted.get('releaseYear') or datetime.now().year
+        description = extracted.get('description') or f"ទស្សនា {final_title} កម្រិតច្បាស់ HD នៅលើ TerkTla Hub។"
+        genres = extracted.get('genres') or ["Action", "Drama"]
+
+        if not video_url:
+            continue
+
+        # Check for duplicate in database
+        cursor.execute("SELECT id FROM content WHERE video_url = ? OR (LOWER(title) = LOWER(?) AND release_year = ?)", (video_url, final_title, release_year))
+        existing_row = cursor.fetchone()
+
+        item_status = "already_exists" if existing_row else "ready"
+        created_movie_id = existing_row["id"] if existing_row else ""
+
+        if auto_save and not existing_row:
+            new_id = "m" + str(int(datetime.now().timestamp() * 1000) + idx)
+            created_date = datetime.now().strftime("%Y-%m-%d")
+            cursor.execute('''
+                INSERT INTO content (
+                    id, title, description, poster_url, backdrop_url, trailer_url, video_url,
+                    release_year, rating, duration, type, genres, is_featured, is_trending,
+                    is_popular, is_latest, is_published, views, cast, director, created_at,
+                    approval_status
+                ) VALUES (?, ?, ?, ?, ?, '', ?, ?, 8.8, '1h 45m', 'movie', ?, 0, 1, 1, 1, 1, 0, '[]', 'Director', ?, 'approved')
+            ''', (
+                new_id, final_title, description, poster_url, backdrop_url, video_url,
+                release_year, json.dumps(genres), created_date
+            ))
+            conn.commit()
+            item_status = "imported"
+            created_movie_id = new_id
+            imported_count += 1
+        elif existing_row:
+            duplicate_count += 1
+
+        results.append({
+            "id": created_movie_id or f"temp_{idx}",
+            "title": final_title,
+            "description": description,
+            "videoUrl": video_url,
+            "posterUrl": poster_url,
+            "backdropUrl": backdrop_url,
+            "releaseYear": release_year,
+            "genres": genres,
+            "duration": "1h 45m",
+            "rating": 8.8,
+            "sourceUrl": post_link,
+            "status": item_status
+        })
+
+    conn.close()
+
+    return {
+        "status": "success",
+        "siteUrl": clean_site_url,
+        "totalScanned": len(results),
+        "importedCount": imported_count,
+        "duplicateCount": duplicate_count,
+        "items": results
+    }
+
+@app.post("/api/admin/crawler/bulk-import")
+def bulk_import_movies_endpoint(payload: dict, authorization: Optional[str] = Header(None)):
+    """
+    Bulk saves a selected list of scraped movies into the database.
+    """
+    require_admin_role(authorization)
+    items = payload.get("items", [])
+    if not items:
+        raise HTTPException(status_code=400, detail="No items provided to import")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    imported = 0
+    duplicates = 0
+
+    for idx, item in enumerate(items, 1):
+        title = (item.get("title") or "").strip()
+        video_url = (item.get("videoUrl") or "").strip()
+        if not title or not video_url:
+            continue
+
+        poster_url = item.get("posterUrl") or ""
+        backdrop_url = item.get("backdropUrl") or poster_url
+        description = item.get("description") or f"ទស្សនា {title} កម្រិតច្បាស់ HD នៅលើ TerkTla Hub។"
+        release_year = int(item.get("releaseYear") or datetime.now().year)
+        genres = item.get("genres") or ["Action", "Drama"]
+        rating = float(item.get("rating") or 8.8)
+        duration = item.get("duration") or "1h 45m"
+
+        cursor.execute("SELECT id FROM content WHERE video_url = ? OR (LOWER(title) = LOWER(?) AND release_year = ?)", (video_url, title, release_year))
+        if cursor.fetchone():
+            duplicates += 1
+            continue
+
+        new_id = "m" + str(int(datetime.now().timestamp() * 1000) + idx)
+        created_date = datetime.now().strftime("%Y-%m-%d")
+        cursor.execute('''
+            INSERT INTO content (
+                id, title, description, poster_url, backdrop_url, trailer_url, video_url,
+                release_year, rating, duration, type, genres, is_featured, is_trending,
+                is_popular, is_latest, is_published, views, cast, director, created_at,
+                approval_status
+            ) VALUES (?, ?, ?, ?, ?, '', ?, ?, ?, ?, 'movie', ?, 0, 1, 1, 1, 1, 0, '[]', 'Director', ?, 'approved')
+        ''', (
+            new_id, title, description, poster_url, backdrop_url, video_url,
+            release_year, rating, duration, json.dumps(genres), created_date
+        ))
+        imported += 1
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "status": "success",
+        "imported": imported,
+        "duplicates": duplicates,
+        "message": f"បាន Import ភាពយន្ត {imported} រឿងដោយជោគជ័យ!"
+    }
+
+
