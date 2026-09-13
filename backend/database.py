@@ -230,10 +230,10 @@ def init_db():
         )
     ''')
 
-    # Seed default genres if empty
+    # Seed default genres ONLY once on initial database creation
     try:
-        cursor.execute("SELECT COUNT(*) FROM genres")
-        if cursor.fetchone()[0] == 0:
+        cursor.execute("SELECT value FROM system_settings WHERE key = 'genres_initialized'")
+        if not cursor.fetchone():
             default_genres = [
                 ("g-1", "សកម្មភាព (Action)", "action"),
                 ("g-2", "វិទ្យាសាស្ត្រ (Sci-Fi)", "sci-fi"),
@@ -245,6 +245,7 @@ def init_db():
                 ("g-8", "ភាពយន្តខ្មែរ (Khmer Cinema)", "khmer-cinema")
             ]
             cursor.executemany("INSERT OR IGNORE INTO genres (id, name, slug) VALUES (?, ?, ?)", default_genres)
+            cursor.execute("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('genres_initialized', 'true')")
             conn.commit()
     except Exception as e:
         print("Genres seed error:", e)
@@ -520,8 +521,8 @@ def toggle_favorite_in_db(user_id: str, content_id: str) -> dict:
             VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
         ''', ('user-1', 'Standard User', 'user@stream.com', user_pass, 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150', 'USER', 'active'))
 
-    cursor.execute("SELECT COUNT(*) FROM genres")
-    if cursor.fetchone()[0] == 0:
+    cursor.execute("SELECT value FROM system_settings WHERE key = 'genres_initialized'")
+    if not cursor.fetchone():
         default_genres = [
             'សកម្មភាព (Action)', 'វិទ្យាសាស្ត្រ (Sci-Fi)', 'រឿងភាគ (Drama)',
             'ផ្សងព្រេង (Adventure)', 'កំប្លែង (Comedy)', 'រំភើប (Thriller)',
@@ -530,7 +531,8 @@ def toggle_favorite_in_db(user_id: str, content_id: str) -> dict:
         for idx, g_name in enumerate(default_genres, 1):
             cursor.execute('''
                 INSERT INTO genres (id, name, slug) VALUES (?, ?, ?)
-            ''', (str(idx), g_name, g_name.lower().replace(' ', '-')))
+            ''', (f"g-{idx}", g_name, g_name.lower().replace(' ', '-')))
+        cursor.execute("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('genres_initialized', 'true')")
 
     conn.commit()
     conn.close()

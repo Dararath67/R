@@ -340,7 +340,7 @@ export const api = {
   },
 
   async addGenre(name: string) {
-    const res = await fetch(`${API_BASE_URL}/genres`, {
+    const res = await fetchWithFailover('/genres', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
       body: JSON.stringify({ name }),
@@ -350,7 +350,7 @@ export const api = {
 
   async deleteGenre(id: string) {
     try {
-      const res = await fetch(`${API_BASE_URL}/genres/${encodeURIComponent(id)}`, {
+      const res = await fetchWithFailover(`/genres/${encodeURIComponent(id)}`, {
         method: 'DELETE',
         headers: { ...getAuthHeader() },
       });

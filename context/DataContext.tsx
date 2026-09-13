@@ -84,7 +84,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [movies, setMovies] = useState<Movie[]>([]);
   const [series, setSeries] = useState<Movie[]>([]);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
-  const [genres, setGenres] = useState<Genre[]>(INITIAL_GENRES);
+  const [genres, setGenres] = useState<Genre[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [bannerSettings, setBannerSettings] = useState<BannerSettings>(DEFAULT_BANNER_SETTINGS);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -304,7 +304,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const deleteGenre = async (id: string) => {
     setGenres((prev) => {
-      const updated = prev.filter((g) => g.id !== id);
+      const updated = prev.filter((g) => g.id !== id && g.name !== id && g.slug !== id);
       localStorage.setItem(GENRES_CACHE_KEY, JSON.stringify(updated));
       return updated;
     });

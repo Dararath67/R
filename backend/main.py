@@ -1075,9 +1075,10 @@ def delete_genre(genre_id: str, authorization: Optional[str] = Header(None)):
         pass
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM genres WHERE id = ? OR name = ? OR slug = ?", (genre_id, genre_id, genre_id))
+    cursor.execute("DELETE FROM genres WHERE LOWER(id) = LOWER(?) OR LOWER(name) = LOWER(?) OR LOWER(slug) = LOWER(?)", (genre_id, genre_id, genre_id))
     conn.commit()
     conn.close()
+    replicate_to_mirror(f"/api/genres/{genre_id}", method="DELETE")
     return {"message": "Genre deleted"}
 
 # ---------------- USERS & AUTH ----------------
