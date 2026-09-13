@@ -43,8 +43,13 @@ export default function AdminEpisodesPage() {
         url: targetUrlOrName,
         filename: targetUrlOrName.includes('/') ? targetUrlOrName.split('/').pop() : targetUrlOrName,
       });
-      if (meta && meta.title && (!title || title.startsWith('tlg_') || title.startsWith('web_') || title.startsWith('dl_'))) {
-        setTitle(meta.title);
+      if (meta) {
+        if (meta.videoUrl && meta.videoUrl.startsWith('http')) {
+          setVideoUrl(meta.videoUrl);
+        }
+        if (meta.title && (!title || title.startsWith('tlg_') || title.startsWith('web_') || title.startsWith('dl_') || title.includes('blog-post'))) {
+          setTitle(meta.title);
+        }
       }
     } catch {}
   };

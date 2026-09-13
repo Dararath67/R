@@ -14,6 +14,7 @@ from urllib.parse import quote
 import jwt
 import re
 import time
+import html as html_lib
 import logging
 
 class IgnoreInvalidHTTPRequest(logging.Filter):
@@ -324,6 +325,127 @@ async def upload_video(request: Request, file: UploadFile = File(...), authoriza
         "absoluteUrl": f"{get_base_url(request)}/uploads/videos/{safe_filename}"
     }
 
+# ---------------- CRAWLER: EXTRACT VIDEO, POSTER & TITLE FROM WEBPAGE ----------------
+def extract_media_from_webpage(web_url: str) -> dict:
+    import urllib.request
+    import urllib.parse
+    import ssl
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    req = urllib.request.Request(
+        web_url,
+        headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        }
+    )
+
+    try:
+        with urllib.request.urlopen(req, context=ctx, timeout=12) as response:
+            raw_html = response.read().decode('utf-8', errors='ignore')
+    except Exception as e:
+        print("extract_media_from_webpage fetch error:", e)
+        return {}
+
+    # 1. Extract Title
+    title = ""
+    t_match = re.search(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']', raw_html, re.IGNORECASE)
+    if not t_match:
+        t_match = re.search(r'<meta[^>]+name=["\']twitter:title["\'][^>]+content=["\']([^"\']+)["\']', raw_html, re.IGNORECASE)
+    if not t_match:
+        t_match = re.search(r'<title>(.*?)</title>', raw_html, re.IGNORECASE | re.DOTALL)
+    
+    if t_match:
+        raw_t = html_lib.unescape(t_match.group(1))
+        # Remove site branding
+        cleaned_t = re.split(r'\s*[\-\|\:\–]\s*(?:JVP\s*KH|8tube|Khmer|Blogger|WordPress|Free Movies|Streaming|Hub)', raw_t, flags=re.IGNORECASE)[0]
+        title = cleaned_t.strip()
+
+    # 2. Extract Poster / Image
+    poster = ""
+    p_match = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', raw_html, re.IGNORECASE)
+    if not p_match:
+        p_match = re.search(r'<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']', raw_html, re.IGNORECASE)
+    if p_match:
+        poster = p_match.group(1).strip()
+    if not poster:
+        p_img = re.search(r'(?:data-original-height=[^>]+|class=["\'][^"\']*thumbnail[^"\']*["\'][^>]+)src=["\']([^"\']+)["\']', raw_html, re.IGNORECASE)
+        if p_img:
+            poster = p_img.group(1).strip()
+    if not poster:
+        all_imgs = re.findall(r'src=["\'](https?://blogger\.googleusercontent\.com/img/[^"\']+)["\']', raw_html, re.IGNORECASE)
+        if all_imgs:
+            poster = all_imgs[0]
+
+    # 3. Extract Embedded Video Stream
+    video_url = ""
+    # Pattern A: playlists = [ { file: "..." } ] or [ { src: "..." } ]
+    pl_match = re.search(r'playlists\s*=\s*\[\s*\{\s*(?:file|src)\s*:\s*["\']([^"\']+)["\']', raw_html, re.IGNORECASE)
+    if pl_match:
+        video_url = pl_match.group(1).strip()
+
+    # Pattern B: direct mp4 / m3u8 in scripts or HTML
+    if not video_url:
+        v_matches = re.findall(r'(https?://[^\s"\'<>]+\.(?:mp4|m3u8|webm|mov)(?:\?[^\s"\'<>]*)?)', raw_html, re.IGNORECASE)
+        for v in v_matches:
+            if not any(ign in v.lower() for ign in ['banner', 'theme', 'skin', 'logo', 'avatar', 'ads']):
+                video_url = v
+                break
+
+    # Pattern C: iframe player embed
+    if not video_url:
+        if_matches = re.findall(r'<iframe[^>]+src=["\']([^"\']+)["\']', raw_html, re.IGNORECASE)
+        for ifr in if_matches:
+            if not any(ign in ifr.lower() for ign in ['facebook.com', 'twitter.com', 'google.com', 'googletagmanager', 'disqus']):
+                video_url = ifr
+                break
+
+    # Pattern D: Query Blogger / WordPress Feed JSON
+    if not video_url:
+        try:
+            parsed_u = urllib.parse.urlparse(web_url)
+            domain = f"{parsed_u.scheme}://{parsed_u.netloc}"
+            slug = os.path.basename(parsed_u.path).replace('.html', '').replace('.php', '')
+            feed_url = f"{domain}/feeds/posts/default?alt=json&max-results=50"
+            freq = urllib.request.Request(feed_url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(freq, context=ctx, timeout=8) as f_res:
+                fdata = json.loads(f_res.read().decode('utf-8'))
+                for entry in fdata.get('feed', {}).get('entry', []):
+                    content_html = entry.get('content', {}).get('$t', '')
+                    matched = False
+                    for ln in entry.get('link', []):
+                        if slug and slug in ln.get('href', ''):
+                            matched = True
+                            break
+                    if matched or (title and title in entry.get('title', {}).get('$t', '')):
+                        v_in_feed = re.search(r'(?:file|src)\s*:\s*["\']([^"\']+\.(?:mp4|m3u8|webm|mov)[^"\']*)["\']', content_html, re.IGNORECASE)
+                        if v_in_feed:
+                            video_url = v_in_feed.group(1)
+                            break
+                        all_v = re.findall(r'(https?://[^\s"\'<>]+\.(?:mp4|m3u8)[^\s"\'<>]*)', content_html, re.IGNORECASE)
+                        if all_v:
+                            video_url = all_v[0]
+                            break
+        except Exception as e_feed:
+            print("feed extraction fallback error:", e_feed)
+
+    # 4. Extract release year
+    year_match = re.search(r'\b(19\d\d|20\d\d)\b', web_url + " " + title)
+    year = int(year_match.group(1)) if year_match else datetime.now().year
+
+    return {
+        "title": title or "ភាពយន្តថ្មី",
+        "videoUrl": video_url,
+        "posterUrl": poster,
+        "backdropUrl": poster,
+        "description": f"ទស្សនា {title or 'ភាពយន្តថ្មី'} កម្រិតច្បាស់ HD ដោយឥតគិតថ្លៃនៅលើ TerkTla Hub។",
+        "releaseYear": year,
+        "genres": ["Action", "Drama"]
+    }
+
 @app.post("/api/upload/download-url")
 async def download_remote_video_url(request: Request):
     import urllib.request
@@ -352,6 +474,17 @@ async def download_remote_video_url(request: Request):
                 "absoluteUrl": f"http://us.apsara.lol:15511/uploads/videos/{filename}"
             }
 
+    # If input is a webpage article URL (e.g. .html, .php, jvpkh.xyz, blogspot, etc.), extract video and poster first!
+    discovered_poster = ""
+    discovered_title = ""
+    is_webpage = not any(remote_url.lower().split("?")[0].endswith(ext) for ext in ALLOWED_VIDEO_EXT)
+    if is_webpage:
+        web_media = extract_media_from_webpage(remote_url)
+        if web_media.get("videoUrl"):
+            remote_url = web_media["videoUrl"]
+            discovered_poster = web_media.get("posterUrl", "")
+            discovered_title = web_media.get("title", "")
+
     try:
         parsed = urllib.parse.urlparse(remote_url)
         path = parsed.path
@@ -376,27 +509,38 @@ async def download_remote_video_url(request: Request):
         with urllib.request.urlopen(req, context=ctx, timeout=600) as response, open(filepath, "wb") as buffer:
             shutil.copyfileobj(response, buffer)
             
-        poster_url = ""
-        try:
-            import subprocess
-            ffmpeg_poster_name = f"poster_dl_{uuid.uuid4().hex[:12]}.jpg"
-            ffmpeg_dest = os.path.join(IMAGES_DIR, ffmpeg_poster_name)
-            cmd = ["ffmpeg", "-y", "-ss", "00:00:03", "-i", filepath, "-vframes", "1", "-q:v", "2", ffmpeg_dest]
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
-            if res.returncode == 0 and os.path.exists(ffmpeg_dest) and os.path.getsize(ffmpeg_dest) > 0:
-                poster_url = f"/uploads/images/{ffmpeg_poster_name}"
-        except Exception as e_ff:
-            print("Download video FFmpeg thumbnail extraction error:", e_ff)
+        poster_url = discovered_poster
+        if not poster_url:
+            try:
+                import subprocess
+                ffmpeg_poster_name = f"poster_dl_{uuid.uuid4().hex[:12]}.jpg"
+                ffmpeg_dest = os.path.join(IMAGES_DIR, ffmpeg_poster_name)
+                cmd = ["ffmpeg", "-y", "-ss", "00:00:03", "-i", filepath, "-vframes", "1", "-q:v", "2", ffmpeg_dest]
+                res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+                if res.returncode == 0 and os.path.exists(ffmpeg_dest) and os.path.getsize(ffmpeg_dest) > 0:
+                    poster_url = f"/uploads/images/{ffmpeg_poster_name}"
+            except Exception as e_ff:
+                print("Download video FFmpeg thumbnail extraction error:", e_ff)
 
         url = f"/uploads/videos/{safe_filename}"
         return {
             "url": url,
             "posterUrl": poster_url,
+            "title": discovered_title,
             "filename": safe_filename,
             "absoluteUrl": f"{get_base_url(request)}/uploads/videos/{safe_filename}"
         }
     except Exception as e:
         print("download_remote_video_url error:", e)
+        # Fallback: if download fails, return the discovered direct streaming URL so user can stream it directly!
+        if is_webpage and remote_url.startswith("http"):
+            return {
+                "url": remote_url,
+                "posterUrl": discovered_poster,
+                "title": discovered_title,
+                "filename": os.path.basename(remote_url.split("?")[0]),
+                "absoluteUrl": remote_url
+            }
         raise HTTPException(
             status_code=400, 
             detail=f"មិនអាចទាញយកវីដេអូពី Link នេះបានទេ ({str(e)})។ ប៉ុន្តែអ្នកអាចប្រើប្រាស់ Link នេះផ្ទាល់ក្នុងប្រអប់ Video URL បានដោយមិនចាំបាច់ Download ឡើយ!"
@@ -444,6 +588,26 @@ async def extract_video_caption_endpoint(request: Request):
             "releaseYear": datetime.now().year,
             "genres": ["Action", "Drama"]
         }
+
+    # 2. Check if raw_url is a webpage article URL (e.g. .html, .php, jvpkh.xyz, blogspot, 8tube, etc.)
+    is_webpage_url = raw_url.startswith("http") and (
+        raw_url.endswith(".html") or raw_url.endswith(".php") or
+        "blog-post" in raw_url or "blogspot" in raw_url or "jvpkh" in raw_url or
+        not any(raw_url.lower().split("?")[0].endswith(ext) for ext in ALLOWED_VIDEO_EXT)
+    )
+    if is_webpage_url:
+        web_info = extract_media_from_webpage(raw_url)
+        if web_info and (web_info.get("videoUrl") or web_info.get("title")):
+            return {
+                "title": web_info.get("title") or "ភាពយន្តថ្មី",
+                "videoUrl": web_info.get("videoUrl") or "",
+                "posterUrl": web_info.get("posterUrl") or "",
+                "backdropUrl": web_info.get("backdropUrl") or "",
+                "description": web_info.get("description") or f"ទស្សនា {web_info.get('title')} កម្រិតច្បាស់ HD",
+                "caption": web_info.get("title") or "",
+                "releaseYear": web_info.get("releaseYear") or datetime.now().year,
+                "genres": ["Action", "Drama"]
+            }
         
     target_str = raw_name or (os.path.basename(raw_url.split("?")[0]) if raw_url else "")
     

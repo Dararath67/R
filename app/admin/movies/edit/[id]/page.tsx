@@ -57,7 +57,14 @@ export default function EditMoviePage() {
         filename: targetUrlOrName.includes('/') ? targetUrlOrName.split('/').pop() : targetUrlOrName,
       });
       if (meta) {
-        if (meta.title && (!title || title.startsWith('tlg_') || title.startsWith('web_') || title.startsWith('dl_'))) {
+        if (meta.videoUrl && meta.videoUrl.startsWith('http')) {
+          setVideoUrl(meta.videoUrl);
+        }
+        if (meta.posterUrl && (!posterUrl || posterUrl.includes('unsplash'))) {
+          setPosterUrl(meta.posterUrl);
+          setBackdropUrl((prev) => prev || meta.posterUrl);
+        }
+        if (meta.title && (!title || title.startsWith('tlg_') || title.startsWith('web_') || title.startsWith('dl_') || title.includes('blog-post'))) {
           setTitle(meta.title);
         }
         if (meta.description && (!description || description.includes('សង្ខេប') || description.length < 10)) {
