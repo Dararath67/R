@@ -49,6 +49,34 @@ export const getFormattedVideoUrl = (rawUrl: string): string => {
     }
     return `http://us.apsara.lol:15511${uploadPath}`;
   }
+
+  if (getYouTubeEmbedUrl(rawUrl)) {
+    return rawUrl;
+  }
+
+  // If already proxied
+  if (rawUrl.startsWith('/api/proxy/video')) {
+    if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
+      return rawUrl;
+    }
+    return `http://us.apsara.lol:15511${rawUrl}`;
+  }
+
+  // If external HTTP / HTTPS link from 3rd party CDN or Webpage
+  if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
+    if (
+      !rawUrl.includes('localhost:15511') &&
+      !rawUrl.includes('us.apsara.lol:15511') &&
+      !rawUrl.includes('/uploads/videos/')
+    ) {
+      const proxyEndpoint = `/api/proxy/video?url=${encodeURIComponent(rawUrl)}`;
+      if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
+        return proxyEndpoint;
+      }
+      return `http://us.apsara.lol:15511${proxyEndpoint}`;
+    }
+  }
+
   return rawUrl;
 };
 
@@ -389,7 +417,10 @@ export const CustomVideoPlayer: React.FC<CustomVideoPlayerProps> = ({
                   onClick={(e) => {
                     e.stopPropagation();
                     setVideoError(false);
-                    const formatted = getFormattedVideoUrl(src);
+                    const proxyEndpoint = `/api/proxy/video?url=${encodeURIComponent(src)}&_t=${Date.now()}`;
+                    const formatted = typeof window !== 'undefined' && window.location.protocol === 'https:'
+                      ? proxyEndpoint
+                      : `http://us.apsara.lol:15511${proxyEndpoint}`;
                     setActiveSrc(formatted);
                     if (videoRef.current) {
                       videoRef.current.src = formatted;
