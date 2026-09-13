@@ -273,7 +273,7 @@ async def proxy_external_video(url: str, request: Request):
     (e.g., 1a-1791.com, Rumble, third-party blogs/hosts) to bypass CORS and hotlink restrictions.
     Supports HTTP 206 Range requests, fast 512KB chunking, and hardware-accelerated playback.
     """
-    clean_url = (url or "").strip()
+    clean_url = re.sub(r'\s+', '', (url or "").strip())
     if not clean_url or not (clean_url.startswith("http://") or clean_url.startswith("https://")):
         raise HTTPException(status_code=400, detail="Valid video URL required (http:// or https://)")
 
@@ -400,6 +400,10 @@ def extract_media_from_webpage(web_url: str) -> dict:
     import urllib.request
     import urllib.parse
     import ssl
+
+    web_url = re.sub(r'\s+', '', (web_url or '').strip())
+    if not web_url or not (web_url.startswith('http://') or web_url.startswith('https://')):
+        return {}
 
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
