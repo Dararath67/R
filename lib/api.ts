@@ -37,12 +37,19 @@ async function fetchWithFailover(path: string, options: RequestInit = {}): Promi
   // Failover to Render.com secondary server
   const secondaryUrl = `${SECONDARY_API_URL}${path}`;
   try {
-    return await fetch(secondaryUrl, options);
+    const resSec = await fetch(secondaryUrl, options);
+    if (resSec.ok || resSec.status < 500) {
+      return resSec;
+    }
   } catch (err) {
     console.error(`Secondary backend also unreachable (${secondaryUrl}):`, err);
   }
 
-  return await fetch(primaryUrl, options);
+  try {
+    return await fetch(primaryUrl, options);
+  } catch (finalErr) {
+    throw new Error('មិនអាចភ្ជាប់ទៅកាន់ Server បានទេ! សូមប្រាកដថា Backend Server កំពុងដំណើរការ ឬពិនិត្យមើល Internet របស់អ្នក។');
+  }
 }
 
 function getAuthHeader(): Record<string, string> {
@@ -424,7 +431,7 @@ export const api = {
   async login(email: string, password?: string, rolePreference?: string) {
     const lowerEmail = (email || '').toLowerCase().trim();
     try {
-      const res = await fetch(`${API_BASE_URL}/users/login`, {
+      const res = await fetchWithFailover('/users/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: lowerEmail, password: password || '', role: rolePreference || 'USER' }),
@@ -436,7 +443,11 @@ export const api = {
       if (err.detail) {
         throw new Error(err.detail);
       }
+      throw new Error('អ៊ីមែល ឬលេខសម្ងាត់មិនត្រឹមត្រូវ!');
     } catch (e: any) {
+      if (e.message && (e.message.includes('fetch') || e.message.includes('Network') || e.message.includes('Failed to fetch') || e.message.includes('connect'))) {
+        throw new Error('មិនអាចភ្ជាប់ទៅកាន់ Server បានទេ! សូមប្រាកដថា Backend Server កំពុងដំណើរការ ឬពិនិត្យមើល Internet របស់អ្នក។');
+      }
       throw e;
     }
   },
