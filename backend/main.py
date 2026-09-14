@@ -400,6 +400,7 @@ def extract_media_from_webpage(web_url: str) -> dict:
     import urllib.request
     import urllib.parse
     import ssl
+    import time
 
     web_url = re.sub(r'\s+', '', (web_url or '').strip())
     if not web_url or not (web_url.startswith('http://') or web_url.startswith('https://')):
@@ -409,20 +410,32 @@ def extract_media_from_webpage(web_url: str) -> dict:
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
 
+    user_agents = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    ]
+    ua = user_agents[abs(hash(web_url)) % len(user_agents)]
+
     req = urllib.request.Request(
         web_url,
         headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            "User-Agent": ua,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9,km;q=0.8",
+            "Referer": "https://www.google.com/"
         }
     )
 
+    raw_html = ""
     try:
-        with urllib.request.urlopen(req, context=ctx, timeout=12) as response:
+        with urllib.request.urlopen(req, context=ctx, timeout=10) as response:
             raw_html = response.read().decode('utf-8', errors='ignore')
     except Exception as e:
-        print("extract_media_from_webpage fetch error:", e)
+        # If rate-limited or error, return empty gracefully without crashing
         return {}
+
 
     # 1. Extract Title
     title = ""
@@ -3153,9 +3166,31 @@ def bulk_crawl_movies_endpoint(payload: dict, authorization: Optional[str] = Hea
             continue
 
         raw_title = entry.get('title', {}).get('$t', '') if isinstance(entry.get('title'), dict) else ""
-        extracted = extract_media_from_webpage(post_link)
         
-        final_title = (extracted.get('title') or raw_title or "").strip()
+        # 1. Fast & Rate-Limit Free Extraction directly from Feed Body (0 network overhead, 0 HTTP 429)
+        content_html = entry.get('content', {}).get('$t', '') or entry.get('summary', {}).get('$t', '')
+        feed_video_url = ""
+        feed_poster_url = ""
+
+        if content_html:
+            v_match = re.search(r'https?://[^\'"\s<>]+\.(?:mp4|caa\.mp4|m3u8|webm)[^\'"\s<>]*', content_html, re.IGNORECASE)
+            if v_match:
+                feed_video_url = v_match.group(0).strip()
+            p_match = re.search(r'<img[^>]+src=[\'"]([^\'"]+)[\'"]', content_html, re.IGNORECASE)
+            if p_match:
+                feed_poster_url = p_match.group(1).strip()
+
+        video_url = feed_video_url
+        poster_url = feed_poster_url
+        final_title = raw_title.strip()
+
+        # 2. Fallback to webpage crawler ONLY if video is missing in feed body
+        if not video_url:
+            extracted = extract_media_from_webpage(post_link)
+            final_title = (extracted.get('title') or raw_title or "").strip()
+            video_url = (extracted.get('videoUrl') or "").strip()
+            poster_url = extracted.get('posterUrl') or feed_poster_url
+
         if not final_title:
             final_title = f"ភាពយន្ត {idx}"
 
@@ -3166,12 +3201,17 @@ def bulk_crawl_movies_endpoint(payload: dict, authorization: Optional[str] = Hea
             if slug_num not in final_title:
                 final_title = f"{final_title} #{slug_num}"
 
-        video_url = (extracted.get('videoUrl') or "").strip()
-        poster_url = extracted.get('posterUrl') or ""
-        backdrop_url = extracted.get('backdropUrl') or poster_url
-        release_year = extracted.get('releaseYear') or datetime.now().year
-        description = extracted.get('description') or f"ទស្សនា {final_title} កម្រិតច្បាស់ HD នៅលើ TerkTla Hub។"
-        genres = extracted.get('genres') or ["Action", "Drama"]
+        backdrop_url = poster_url
+        release_year = datetime.now().year
+        y_m = re.search(r'\b(201\d|202\d)\b', final_title)
+        if y_m:
+            try:
+                release_year = int(y_m.group(1))
+            except Exception:
+                pass
+
+        description = f"ទស្សនា {final_title} កម្រិតច្បាស់ HD នៅលើ TerkTla Hub។"
+        genres = ["Action", "Drama"]
 
         if not video_url:
             continue
