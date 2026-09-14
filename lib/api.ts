@@ -16,18 +16,26 @@ const API_BASE_URL = getApiBaseUrl();
 const SECONDARY_API_URL = RENDER_API_URL;
 
 async function fetchWithFailover(path: string, options: RequestInit = {}): Promise<Response> {
+  const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
   const isLocalClient = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
   
-  // Ordered failover candidates: Localhost -> Apsara VPS -> Render Cloud -> Relative Proxy
-  const candidates = isLocalClient
-    ? [LOCAL_API_URL, APSARA_API_URL, RENDER_API_URL, '/api']
-    : [APSARA_API_URL, RENDER_API_URL, LOCAL_API_URL, '/api'];
+  // Intelligent candidate ordering:
+  // - On HTTPS (e.g. Vercel): prioritize relative '/api' (Next.js server rewrite to Apsara) and Render HTTPS to prevent Mixed Content blocking.
+  // - On Localhost: prioritize Localhost API first, then Next.js proxy, then Apsara, then Render.
+  const candidates = isHttps
+    ? ['/api', RENDER_API_URL, APSARA_API_URL]
+    : isLocalClient
+    ? [LOCAL_API_URL, '/api', APSARA_API_URL, RENDER_API_URL]
+    : ['/api', APSARA_API_URL, RENDER_API_URL, LOCAL_API_URL];
+
+  const isLongRunning = path.includes('/crawler/') || path.includes('/upload/') || path.includes('/bulk');
+  const timeoutMs = isLongRunning ? 120000 : 12000;
 
   for (const baseUrl of candidates) {
     try {
       const fullUrl = baseUrl.startsWith('/') ? `${baseUrl}${path}` : `${baseUrl}${path}`;
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
       const res = await fetch(fullUrl, { ...options, signal: controller.signal });
       clearTimeout(timeoutId);
       if (res.ok || res.status < 500) {
