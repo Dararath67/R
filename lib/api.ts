@@ -1,56 +1,46 @@
+const APSARA_API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://us.apsara.lol:15511/api';
+const RENDER_API_URL = process.env.NEXT_PUBLIC_SECONDARY_API_URL || 'https://r-diut.onrender.com/api';
+const LOCAL_API_URL = 'http://localhost:8000/api';
+
 const getApiBaseUrl = () => {
   if (typeof window !== 'undefined') {
     if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-      return 'http://localhost:8000/api';
+      return LOCAL_API_URL;
     }
-    return process.env.NEXT_PUBLIC_API_URL || 'http://us.apsara.lol:15511/api';
+    return APSARA_API_URL;
   }
-  return process.env.NEXT_PUBLIC_API_URL || 'http://us.apsara.lol:15511/api';
+  return APSARA_API_URL;
 };
 
 const API_BASE_URL = getApiBaseUrl();
-const SECONDARY_API_URL = process.env.NEXT_PUBLIC_SECONDARY_API_URL || 'https://r-diut.onrender.com/api';
+const SECONDARY_API_URL = RENDER_API_URL;
 
 async function fetchWithFailover(path: string, options: RequestInit = {}): Promise<Response> {
-  const primaryUrl = `${API_BASE_URL}${path}`;
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
-    const res = await fetch(primaryUrl, { ...options, signal: controller.signal });
-    clearTimeout(timeoutId);
-    if (res.ok || res.status < 500) {
-      return res;
+  const isLocalClient = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+  
+  // Ordered failover candidates: Localhost -> Apsara VPS -> Render Cloud -> Relative Proxy
+  const candidates = isLocalClient
+    ? [LOCAL_API_URL, APSARA_API_URL, RENDER_API_URL, '/api']
+    : [APSARA_API_URL, RENDER_API_URL, LOCAL_API_URL, '/api'];
+
+  for (const baseUrl of candidates) {
+    try {
+      const fullUrl = baseUrl.startsWith('/') ? `${baseUrl}${path}` : `${baseUrl}${path}`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const res = await fetch(fullUrl, { ...options, signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (res.ok || res.status < 500) {
+        return res;
+      }
+    } catch (e) {
+      // Try next failover candidate seamlessly
     }
-  } catch (e) {
-    console.warn(`Primary backend unreachable (${primaryUrl}), trying secondary backend...`, e);
   }
 
-  // Fallback to relative path in case of Next.js rewrites proxy
-  try {
-    const relativeUrl = `/api${path}`;
-    const resRel = await fetch(relativeUrl, options);
-    if (resRel.ok || resRel.status < 500) {
-      return resRel;
-    }
-  } catch {}
-
-  // Failover to Render.com secondary server
-  const secondaryUrl = `${SECONDARY_API_URL}${path}`;
-  try {
-    const resSec = await fetch(secondaryUrl, options);
-    if (resSec.ok || resSec.status < 500) {
-      return resSec;
-    }
-  } catch (err) {
-    console.error(`Secondary backend also unreachable (${secondaryUrl}):`, err);
-  }
-
-  try {
-    return await fetch(primaryUrl, options);
-  } catch (finalErr) {
-    throw new Error('មិនអាចភ្ជាប់ទៅកាន់ Server បានទេ! សូមប្រាកដថា Backend Server កំពុងដំណើរការ ឬពិនិត្យមើល Internet របស់អ្នក។');
-  }
+  throw new Error('មិនអាចភ្ជាប់ទៅកាន់ Server បានទេ! សូមប្រាកដថា Apsara, Render ឬ Local Backend Server កំពុងដំណើរការ។');
 }
+
 
 function getAuthHeader(): Record<string, string> {
   if (typeof window === 'undefined') return {};
@@ -376,7 +366,7 @@ export const api = {
   async verifyToken(token: string) {
     if (!token) return { valid: false, reason: 'no_token' };
     try {
-      const res = await fetch(`${API_BASE_URL}/auth/me`, {
+      const res = await fetchWithFailover('/auth/me', {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.status === 401 || res.status === 403) {
@@ -394,7 +384,7 @@ export const api = {
 
   async getUsers() {
     try {
-      const res = await fetch(`${API_BASE_URL}/users`, {
+      const res = await fetchWithFailover('/users', {
         headers: { ...getAuthHeader() },
       });
       if (!res.ok) return [];
@@ -406,7 +396,7 @@ export const api = {
 
   async getUserSessions() {
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/sessions`, {
+      const res = await fetchWithFailover('/admin/sessions', {
         headers: { ...getAuthHeader() },
       });
       if (!res.ok) return [];
@@ -417,7 +407,7 @@ export const api = {
   },
 
   async revokeUserSession(sessionId: string) {
-    const res = await fetch(`${API_BASE_URL}/admin/sessions/revoke/${sessionId}`, {
+    const res = await fetchWithFailover(`/admin/sessions/revoke/${sessionId}`, {
       method: 'POST',
       headers: { ...getAuthHeader() },
     });
@@ -453,7 +443,7 @@ export const api = {
   },
 
   async toggleBanUser(id: string) {
-    const res = await fetch(`${API_BASE_URL}/users/${id}/ban`, {
+    const res = await fetchWithFailover(`/users/${id}/ban`, {
       method: 'PATCH',
       headers: { ...getAuthHeader() },
     });
@@ -465,7 +455,7 @@ export const api = {
   },
 
   async deleteUser(id: string) {
-    const res = await fetch(`${API_BASE_URL}/users/${id}`, {
+    const res = await fetchWithFailover(`/users/${id}`, {
       method: 'DELETE',
       headers: { ...getAuthHeader() },
     });
@@ -478,7 +468,7 @@ export const api = {
 
   async toggleFavorite(contentId: string) {
     try {
-      const res = await fetch(`${API_BASE_URL}/users/favorites/toggle/${contentId}`, {
+      const res = await fetchWithFailover(`/users/favorites/toggle/${contentId}`, {
         method: 'POST',
         headers: { ...getAuthHeader() },
       });
@@ -492,7 +482,7 @@ export const api = {
   // Stats
   async getStats() {
     try {
-      const res = await fetch(`${API_BASE_URL}/stats`);
+      const res = await fetchWithFailover('/stats');
       if (!res.ok) return null;
       return await res.json();
     } catch {
@@ -512,7 +502,7 @@ export const api = {
   // Banner Settings
   async getBannerSettings() {
     try {
-      const res = await fetch(`${API_BASE_URL}/settings/banner`);
+      const res = await fetchWithFailover('/settings/banner');
       if (!res.ok) return null;
       return await res.json();
     } catch {
@@ -521,7 +511,7 @@ export const api = {
   },
 
   async register(name: string, email: string, password: string, avatar?: string) {
-    const res = await fetch(`${API_BASE_URL}/users/register`, {
+    const res = await fetchWithFailover('/users/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, email, password, avatar }),
@@ -534,7 +524,7 @@ export const api = {
   },
 
   async updateProfile(userId: string, data: { name?: string; email?: string; avatar?: string }) {
-    const res = await fetch(`${API_BASE_URL}/users/profile`, {
+    const res = await fetchWithFailover('/users/profile', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId, ...data }),
@@ -544,7 +534,7 @@ export const api = {
   },
 
   async changePassword(userId: string, oldPassword?: string, newPassword?: string) {
-    const res = await fetch(`${API_BASE_URL}/users/change-password`, {
+    const res = await fetchWithFailover('/users/change-password', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
       body: JSON.stringify({ userId, oldPassword, newPassword }),
@@ -559,7 +549,7 @@ export const api = {
   // Notifications
   async getNotifications() {
     try {
-      const res = await fetch(`${API_BASE_URL}/notifications`, {
+      const res = await fetchWithFailover('/notifications', {
         headers: { ...getAuthHeader() },
       });
       if (!res.ok) return [];
@@ -571,7 +561,7 @@ export const api = {
 
   async sendNotification(notifData: any) {
     try {
-      const res = await fetch(`${API_BASE_URL}/notifications`, {
+      const res = await fetchWithFailover('/notifications', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(notifData),
@@ -584,7 +574,7 @@ export const api = {
 
   async markNotificationsRead() {
     try {
-      const res = await fetch(`${API_BASE_URL}/notifications/read-all`, {
+      const res = await fetchWithFailover('/notifications/read-all', {
         method: 'POST',
       });
       return await res.json();
@@ -595,7 +585,7 @@ export const api = {
 
   async deleteNotification(id: string) {
     try {
-      const res = await fetch(`${API_BASE_URL}/notifications/${id}`, {
+      const res = await fetchWithFailover(`/notifications/${id}`, {
         method: 'DELETE',
       });
       return await res.json();
@@ -606,7 +596,7 @@ export const api = {
 
   async clearAllNotifications() {
     try {
-      const res = await fetch(`${API_BASE_URL}/notifications`, {
+      const res = await fetchWithFailover('/notifications', {
         method: 'DELETE',
       });
       return await res.json();
@@ -617,7 +607,7 @@ export const api = {
 
   async updateBannerSettings(settings: any) {
     try {
-      const res = await fetch(`${API_BASE_URL}/settings/banner`, {
+      const res = await fetchWithFailover('/settings/banner', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
         body: JSON.stringify(settings),
@@ -631,7 +621,7 @@ export const api = {
   // Security Audit Logs & Protection Matrix
   async getSecurityHealth() {
     try {
-      const res = await fetch(`${API_BASE_URL}/security/health`);
+      const res = await fetchWithFailover('/security/health');
       if (!res.ok) return null;
       return await res.json();
     } catch {
@@ -641,7 +631,7 @@ export const api = {
 
   async getSecurityLogs() {
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/security-logs`, {
+      const res = await fetchWithFailover('/admin/security-logs', {
         headers: { ...getAuthHeader() },
       });
       if (!res.ok) return [];
@@ -654,7 +644,7 @@ export const api = {
   // IP Banning Management
   async getBannedIps() {
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/banned-ips`, {
+      const res = await fetchWithFailover('/admin/banned-ips', {
         headers: { ...getAuthHeader() },
       });
       if (!res.ok) return [];
@@ -665,7 +655,7 @@ export const api = {
   },
 
   async banIp(ipAddress: string, reason?: string) {
-    const res = await fetch(`${API_BASE_URL}/admin/banned-ips`, {
+    const res = await fetchWithFailover('/admin/banned-ips', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
       body: JSON.stringify({ ipAddress, reason: reason || 'Banned by Admin' }),
@@ -678,7 +668,7 @@ export const api = {
   },
 
   async unbanIp(ipAddress: string) {
-    const res = await fetch(`${API_BASE_URL}/admin/banned-ips/${encodeURIComponent(ipAddress)}`, {
+    const res = await fetchWithFailover(`/admin/banned-ips/${encodeURIComponent(ipAddress)}`, {
       method: 'DELETE',
       headers: { ...getAuthHeader() },
     });
@@ -692,7 +682,7 @@ export const api = {
   // Telegram Bot Settings
   async getTelegramSettings() {
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/settings/telegram`, {
+      const res = await fetchWithFailover('/admin/settings/telegram', {
         headers: { ...getAuthHeader() },
       });
       if (res.ok) {
@@ -721,7 +711,7 @@ export const api = {
       localStorage.setItem('telegram_chat_id', telegramChatId);
     }
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/settings/telegram`, {
+      const res = await fetchWithFailover('/admin/settings/telegram', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
         body: JSON.stringify({ telegramBotToken, telegramChatId }),
@@ -735,7 +725,7 @@ export const api = {
 
   async testTelegramSettings(telegramBotToken: string, telegramChatId: string) {
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/settings/telegram/test`, {
+      const res = await fetchWithFailover('/admin/settings/telegram/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
         body: JSON.stringify({ telegramBotToken, telegramChatId }),
@@ -765,7 +755,7 @@ export const api = {
   },
 
   async setTelegramWebhook() {
-    const res = await fetch(`${API_BASE_URL}/admin/settings/telegram/set-webhook`, {
+    const res = await fetchWithFailover('/admin/settings/telegram/set-webhook', {
       method: 'POST',
       headers: { ...getAuthHeader() },
     });
@@ -799,7 +789,7 @@ export const api = {
   // Active User Sessions & Force Logout
   async getActiveSessions() {
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/sessions`, {
+      const res = await fetchWithFailover('/admin/sessions', {
         headers: { ...getAuthHeader() },
       });
       if (!res.ok) return [];
@@ -810,7 +800,7 @@ export const api = {
   },
 
   async revokeSession(sessionId: string) {
-    const res = await fetch(`${API_BASE_URL}/admin/sessions/${sessionId}`, {
+    const res = await fetchWithFailover(`/admin/sessions/${sessionId}`, {
       method: 'DELETE',
       headers: { ...getAuthHeader() },
     });
@@ -823,7 +813,7 @@ export const api = {
 
   // Database Backup & Restore
   async downloadDatabaseBackup() {
-    const res = await fetch(`${API_BASE_URL}/admin/system/backup`, {
+    const res = await fetchWithFailover('/admin/system/backup', {
       headers: { ...getAuthHeader() },
     });
     if (!res.ok) throw new Error('Failed to download database backup');
@@ -840,7 +830,7 @@ export const api = {
   async restoreDatabase(file: File) {
     const formData = new FormData();
     formData.append('file', file);
-    const res = await fetch(`${API_BASE_URL}/admin/system/restore`, {
+    const res = await fetchWithFailover('/admin/system/restore', {
       method: 'POST',
       headers: { ...getAuthHeader() },
       body: formData,
@@ -855,7 +845,7 @@ export const api = {
   // Movie Comments & Ratings
   async getMovieComments(contentId: string) {
     try {
-      const res = await fetch(`${API_BASE_URL}/movies/${contentId}/comments`);
+      const res = await fetchWithFailover(`/movies/${contentId}/comments`);
       if (!res.ok) return [];
       return await res.json();
     } catch {
@@ -864,7 +854,7 @@ export const api = {
   },
 
   async postMovieComment(contentId: string, comment: string, rating: number = 5.0) {
-    const res = await fetch(`${API_BASE_URL}/movies/${contentId}/comments`, {
+    const res = await fetchWithFailover(`/movies/${contentId}/comments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
       body: JSON.stringify({ comment, rating }),
@@ -877,7 +867,7 @@ export const api = {
   },
 
   async deleteMovieComment(commentId: string) {
-    const res = await fetch(`${API_BASE_URL}/admin/comments/${commentId}`, {
+    const res = await fetchWithFailover(`/admin/comments/${commentId}`, {
       method: 'DELETE',
       headers: { ...getAuthHeader() },
     });
@@ -888,7 +878,7 @@ export const api = {
   // Auto-Resume Watch History Progress
   async saveWatchProgress(contentId: string, currentTime: number, duration: number, contentType: string = 'movie', episodeId?: string) {
     try {
-      await fetch(`${API_BASE_URL}/watch-history/progress`, {
+      await fetchWithFailover('/watch-history/progress', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
         body: JSON.stringify({ contentId, currentTime, duration, contentType, episodeId }),
@@ -900,7 +890,7 @@ export const api = {
 
   async getWatchProgress(contentId: string) {
     try {
-      const res = await fetch(`${API_BASE_URL}/watch-history/progress/${contentId}`, {
+      const res = await fetchWithFailover(`/watch-history/progress/${contentId}`, {
         headers: { ...getAuthHeader() },
       });
       if (!res.ok) return { currentTime: 0, duration: 0, progress: 0 };
@@ -913,9 +903,9 @@ export const api = {
   // Live User Chat (Group & Private)
   async getChatMessages(roomType: string = 'GROUP', recipientId?: string) {
     try {
-      let url = `${API_BASE_URL}/chat/messages?room_type=${roomType}`;
-      if (recipientId) url += `&recipient_id=${recipientId}`;
-      const res = await fetch(url, {
+      let path = `/chat/messages?room_type=${roomType}`;
+      if (recipientId) path += `&recipient_id=${recipientId}`;
+      const res = await fetchWithFailover(path, {
         headers: { ...getAuthHeader() },
       });
       if (!res.ok) return [];
@@ -926,7 +916,7 @@ export const api = {
   },
 
   async sendChatMessage(message: string, roomType: string = 'GROUP', recipientId?: string, mediaUrl?: string, mediaType?: string, replyToId?: string, replyToSender?: string, replyToText?: string) {
-    const res = await fetch(`${API_BASE_URL}/chat/messages`, {
+    const res = await fetchWithFailover('/chat/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
       body: JSON.stringify({ message, roomType, recipientId, mediaUrl, mediaType, replyToId, replyToSender, replyToText }),
@@ -946,7 +936,7 @@ export const api = {
       formData.append('file', file);
     }
 
-    const res = await fetch(`${API_BASE_URL}/chat/upload`, {
+    const res = await fetchWithFailover('/chat/upload', {
       method: 'POST',
       headers: { ...getAuthHeader() },
       body: formData,
@@ -962,7 +952,7 @@ export const api = {
 
   async getChatUsers() {
     try {
-      const res = await fetch(`${API_BASE_URL}/chat/users`, {
+      const res = await fetchWithFailover('/chat/users', {
         headers: { ...getAuthHeader() },
       });
       if (!res.ok) return [];
@@ -974,7 +964,7 @@ export const api = {
 
   async getSupportConversations() {
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/support/conversations`, {
+      const res = await fetchWithFailover('/admin/support/conversations', {
         headers: { ...getAuthHeader() },
       });
       if (!res.ok) return [];
@@ -985,7 +975,7 @@ export const api = {
   },
 
   async deleteChatMessage(messageId: string) {
-    const res = await fetch(`${API_BASE_URL}/chat/messages/${messageId}`, {
+    const res = await fetchWithFailover(`/chat/messages/${messageId}`, {
       method: 'DELETE',
       headers: { ...getAuthHeader() },
     });
@@ -997,7 +987,7 @@ export const api = {
   },
 
   async toggleUserVip(userId: string) {
-    const res = await fetch(`${API_BASE_URL}/users/${userId}/toggle-vip`, {
+    const res = await fetchWithFailover(`/users/${userId}/toggle-vip`, {
       method: 'POST',
       headers: { ...getAuthHeader() },
     });
@@ -1006,7 +996,7 @@ export const api = {
   },
 
   async sendCallSignal(targetUserId: string, type: string, sdp?: any, candidate?: any) {
-    const res = await fetch(`${API_BASE_URL}/chat/call/signal`, {
+    const res = await fetchWithFailover('/chat/call/signal', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
       body: JSON.stringify({ targetUserId, type, sdp, candidate }),
@@ -1017,7 +1007,7 @@ export const api = {
 
   async getCallSignals() {
     try {
-      const res = await fetch(`${API_BASE_URL}/chat/call/signal`, {
+      const res = await fetchWithFailover('/chat/call/signal', {
         headers: { ...getAuthHeader() },
       });
       if (!res.ok) return [];
@@ -1028,7 +1018,7 @@ export const api = {
   },
 
   async createWatchParty(movieId: string) {
-    const res = await fetch(`${API_BASE_URL}/watch-party/create`, {
+    const res = await fetchWithFailover('/watch-party/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
       body: JSON.stringify({ movieId }),
@@ -1039,7 +1029,7 @@ export const api = {
 
   async getWatchParty(roomId: string) {
     try {
-      const res = await fetch(`${API_BASE_URL}/watch-party/${roomId}`);
+      const res = await fetchWithFailover(`/watch-party/${roomId}`);
       if (!res.ok) return null;
       return await res.json();
     } catch {
@@ -1049,7 +1039,7 @@ export const api = {
 
   async syncWatchParty(roomId: string, currentTime: number, isPlaying: boolean) {
     try {
-      const res = await fetch(`${API_BASE_URL}/watch-party/${roomId}/sync`, {
+      const res = await fetchWithFailover(`/watch-party/${roomId}/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
         body: JSON.stringify({ currentTime, isPlaying }),
@@ -1062,7 +1052,7 @@ export const api = {
 
   async getApiMovies() {
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/api-movies`, {
+      const res = await fetchWithFailover('/admin/api-movies', {
         headers: { ...getAuthHeader() },
       });
       if (!res.ok) return [];
@@ -1073,7 +1063,7 @@ export const api = {
   },
 
   async addApiMovie(payload: any) {
-    const res = await fetch(`${API_BASE_URL}/admin/api-movies`, {
+    const res = await fetchWithFailover('/admin/api-movies', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
       body: JSON.stringify(payload),
@@ -1086,7 +1076,7 @@ export const api = {
   },
 
   async updateApiMovie(id: string, payload: any) {
-    const res = await fetch(`${API_BASE_URL}/admin/api-movies/${id}`, {
+    const res = await fetchWithFailover(`/admin/api-movies/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
       body: JSON.stringify(payload),
@@ -1099,7 +1089,7 @@ export const api = {
   },
 
   async deleteApiMovie(id: string) {
-    const res = await fetch(`${API_BASE_URL}/admin/api-movies/${id}`, {
+    const res = await fetchWithFailover(`/admin/api-movies/${id}`, {
       method: 'DELETE',
       headers: { ...getAuthHeader() },
     });
@@ -1108,7 +1098,7 @@ export const api = {
   },
 
   async autoGenerateApiMovies() {
-    const res = await fetch(`${API_BASE_URL}/admin/api-movies/auto-generate`, {
+    const res = await fetchWithFailover('/admin/api-movies/auto-generate', {
       method: 'POST',
       headers: { ...getAuthHeader() },
     });
@@ -1118,7 +1108,7 @@ export const api = {
 
   // Video Broken Link Reports
   async submitVideoReport(payload: { contentId: string; contentTitle: string; reason: string; details?: string; episodeId?: string; episodeTitle?: string }) {
-    const res = await fetch(`${API_BASE_URL}/reports`, {
+    const res = await fetchWithFailover('/reports', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
       body: JSON.stringify(payload),
@@ -1132,9 +1122,9 @@ export const api = {
 
   async getAdminReports(status?: string) {
     try {
-      let url = `${API_BASE_URL}/admin/reports`;
-      if (status) url += `?status=${encodeURIComponent(status)}`;
-      const res = await fetch(url, {
+      let path = `/admin/reports`;
+      if (status) path += `?status=${encodeURIComponent(status)}`;
+      const res = await fetchWithFailover(path, {
         headers: { ...getAuthHeader() },
       });
       if (!res.ok) return [];
@@ -1145,7 +1135,7 @@ export const api = {
   },
 
   async updateReportStatus(reportId: string, status: string) {
-    const res = await fetch(`${API_BASE_URL}/admin/reports/${reportId}`, {
+    const res = await fetchWithFailover(`/admin/reports/${reportId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
       body: JSON.stringify({ status }),
@@ -1156,7 +1146,7 @@ export const api = {
 
   // Movie Requests
   async submitMovieRequest(payload: { title: string; description?: string; genre?: string }) {
-    const res = await fetch(`${API_BASE_URL}/movie-requests`, {
+    const res = await fetchWithFailover('/movie-requests', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
       body: JSON.stringify(payload),
@@ -1170,9 +1160,9 @@ export const api = {
 
   async getAdminMovieRequests(status?: string) {
     try {
-      let url = `${API_BASE_URL}/admin/movie-requests`;
-      if (status) url += `?status=${encodeURIComponent(status)}`;
-      const res = await fetch(url, {
+      let path = `/admin/movie-requests`;
+      if (status) path += `?status=${encodeURIComponent(status)}`;
+      const res = await fetchWithFailover(path, {
         headers: { ...getAuthHeader() },
       });
       if (!res.ok) return [];
@@ -1183,7 +1173,7 @@ export const api = {
   },
 
   async updateMovieRequestStatus(requestId: string, status: string, adminNote?: string) {
-    const res = await fetch(`${API_BASE_URL}/admin/movie-requests/${requestId}`, {
+    const res = await fetchWithFailover(`/admin/movie-requests/${requestId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
       body: JSON.stringify({ status, adminNote }),
@@ -1194,7 +1184,7 @@ export const api = {
 
   // Series Follows
   async toggleFollowSeries(contentId: string) {
-    const res = await fetch(`${API_BASE_URL}/series/${contentId}/follow`, {
+    const res = await fetchWithFailover(`/series/${contentId}/follow`, {
       method: 'POST',
       headers: { ...getAuthHeader() },
     });
@@ -1204,7 +1194,7 @@ export const api = {
 
   async getSeriesFollowStatus(contentId: string) {
     try {
-      const res = await fetch(`${API_BASE_URL}/series/${contentId}/follow-status`, {
+      const res = await fetchWithFailover(`/series/${contentId}/follow-status`, {
         headers: { ...getAuthHeader() },
       });
       if (!res.ok) return { isFollowing: false };
@@ -1224,7 +1214,7 @@ export const api = {
       if (params.sortBy) queryParams.set('sort_by', params.sortBy);
       if (params.q) queryParams.set('q', params.q);
 
-      const res = await fetch(`${API_BASE_URL}/movies/filter?${queryParams.toString()}`);
+      const res = await fetchWithFailover(`/movies/filter?${queryParams.toString()}`);
       if (!res.ok) return [];
       return await res.json();
     } catch {
@@ -1235,7 +1225,7 @@ export const api = {
   // Admin Analytics
   async getAdminAnalytics() {
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/analytics`, {
+      const res = await fetchWithFailover('/admin/analytics', {
         headers: { ...getAuthHeader() },
       });
       if (!res.ok) return null;
